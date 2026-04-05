@@ -48,64 +48,86 @@ tabs.forEach(tab => {
 
 // ===== WebSocket + WebRTC Setup =====
 const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-const ws = new WebSocket(`${wsProtocol}//${location.host}`);
 
+let ws = null;
 let peer = null;
 let isInitiator = false;
+let joinRetries = 0;
+const MAX_RETRIES = 5;
 
 function setConnected(connected) {
   statusDot.classList.toggle('connected', connected);
   connectionText.textContent = connected ? '已連線 - P2P 直連' : '等待對方連線...';
 }
 
-ws.onopen = () => {
-  // Join the room
-  ws.send(JSON.stringify({ type: 'join-room', code: roomCode }));
-};
+function connectWS() {
+  ws = new WebSocket(`${wsProtocol}//${location.host}`);
 
-ws.onmessage = (event) => {
-  const msg = JSON.parse(event.data);
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ type: 'join-room', code: roomCode }));
+  };
 
-  switch (msg.type) {
-    case 'room-joined':
-      // Successfully joined
-      break;
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
 
-    case 'peer-joined':
-      if (msg.count === 2) {
-        // We are now two peers - initiator creates the offer
-        isInitiator = true;
-        setupPeer(true);
+    switch (msg.type) {
+      case 'room-joined':
+        joinRetries = 0;
+        connectionText.textContent = '已加入房間，等待對方...';
+        break;
+
+      case 'peer-joined':
+        if (msg.count === 2) {
+          isInitiator = true;
+          setupPeer(true);
+        }
+        break;
+
+      case 'signal':
+        if (!peer) {
+          setupPeer(false);
+        }
+        peer.handleSignal(msg.data);
+        break;
+
+      case 'peer-left':
+        setConnected(false);
+        connectionText.textContent = '對方已離開';
+        showToast('對方已離開房間', 'error');
+        break;
+
+      case 'error':
+        if (msg.message === '房間不存在' && joinRetries < MAX_RETRIES) {
+          joinRetries++;
+          connectionText.textContent = `正在重試連線 (${joinRetries}/${MAX_RETRIES})...`;
+          setTimeout(() => {
+            if (ws.readyState === 1) {
+              ws.send(JSON.stringify({ type: 'join-room', code: roomCode }));
+            }
+          }, 1000);
+        } else if (msg.message === '房間不存在') {
+          showToast('房間不存在或已過期', 'error');
+          setTimeout(() => { location.href = '/'; }, 2000);
+        } else {
+          showToast(msg.message, 'error');
+        }
+        break;
+    }
+  };
+
+  ws.onclose = () => {
+    setConnected(false);
+    connectionText.textContent = '連線中斷，重新連線中...';
+    // Auto reconnect after 2 seconds
+    setTimeout(() => {
+      if (!peer || !peer.connected) {
+        connectWS();
       }
-      break;
+    }, 2000);
+  };
+}
 
-    case 'signal':
-      if (!peer) {
-        // We received a signal but haven't set up yet - we're the receiver
-        setupPeer(false);
-      }
-      peer.handleSignal(msg.data);
-      break;
-
-    case 'peer-left':
-      setConnected(false);
-      connectionText.textContent = '對方已離開';
-      showToast('對方已離開房間', 'error');
-      break;
-
-    case 'error':
-      showToast(msg.message, 'error');
-      if (msg.message === '房間不存在') {
-        setTimeout(() => { location.href = '/'; }, 2000);
-      }
-      break;
-  }
-};
-
-ws.onclose = () => {
-  setConnected(false);
-  connectionText.textContent = '連線中斷';
-};
+connectWS();
 
 function setupPeer(initiator) {
   peer = new PeerConnection(

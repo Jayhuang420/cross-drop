@@ -63,9 +63,13 @@ ws.onmessage = (event) => {
       currentRoomCode = msg.code;
       displayCode.textContent = msg.code;
       showScreen(waitingScreen);
-      // Generate QR Code with room URL
+      // Generate QR Code - points directly to room.html
       const roomUrl = `${location.origin}/room.html?room=${msg.code}`;
       generateQR(roomUrl, qrContainer);
+      // Creator goes to room.html immediately (room persists on server)
+      setTimeout(() => {
+        location.href = `/room.html?room=${msg.code}`;
+      }, 500);
       break;
 
     case 'room-joined':
@@ -75,10 +79,7 @@ ws.onmessage = (event) => {
       break;
 
     case 'peer-joined':
-      if (msg.count === 2) {
-        // Both peers are in, go to room
-        location.href = `/room.html?room=${currentRoomCode}`;
-      }
+      // Already on waiting screen or about to redirect
       break;
 
     case 'error':
