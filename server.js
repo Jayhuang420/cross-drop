@@ -9,8 +9,10 @@ const wss = new WebSocketServer({ server });
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Room storage: roomCode -> { clients: [ws, ws], created: Date, deleteTimer: null }
+const MAX_CLIENTS = 5;
+// Room storage: roomCode -> { clients: Map<peerId, ws>, created, deleteTimer }
 const rooms = new Map();
+let peerIdCounter = 0;
 
 function generateRoomCode() {
   let code;
@@ -20,11 +22,15 @@ function generateRoomCode() {
   return code;
 }
 
-// Clean up stale rooms every 10 minutes
+function generatePeerId() {
+  return 'p' + (++peerIdCounter) + '_' + Math.random().toString(36).slice(2, 6);
+}
+
+// Clean up stale rooms
 setInterval(() => {
   const now = Date.now();
   for (const [code, room] of rooms) {
-    if (now - room.created > 60 * 60 * 1000 && room.clients.length === 0) {
+    if (now - room.created > 60 * 60 * 1000 && room.clients.size === 0) {
       rooms.delete(code);
     }
   }
@@ -32,24 +38,25 @@ setInterval(() => {
 
 wss.on('connection', (ws) => {
   ws.roomCode = null;
+  ws.peerId = null;
   ws.isAlive = true;
 
   ws.on('pong', () => { ws.isAlive = true; });
 
   ws.on('message', (data) => {
     let msg;
-    try {
-      msg = JSON.parse(data);
-    } catch {
-      return;
-    }
+    try { msg = JSON.parse(data); } catch { return; }
 
     switch (msg.type) {
       case 'create-room': {
         const code = generateRoomCode();
-        rooms.set(code, { clients: [ws], created: Date.now(), deleteTimer: null });
+        const peerId = generatePeerId();
+        const room = { clients: new Map(), created: Date.now(), deleteTimer: null };
+        room.clients.set(peerId, ws);
+        rooms.set(code, room);
         ws.roomCode = code;
-        ws.send(JSON.stringify({ type: 'room-created', code }));
+        ws.peerId = peerId;
+        ws.send(JSON.stringify({ type: 'room-created', code, peerId }));
         break;
       }
 
@@ -60,58 +67,72 @@ wss.on('connection', (ws) => {
           ws.send(JSON.stringify({ type: 'error', message: '房間不存在' }));
           return;
         }
-        // Cancel any pending delete timer
         if (room.deleteTimer) {
           clearTimeout(room.deleteTimer);
           room.deleteTimer = null;
         }
-        // Remove stale clients (closed connections still in array)
-        room.clients = room.clients.filter(c => c.readyState === 1);
-        if (room.clients.length >= 2) {
-          ws.send(JSON.stringify({ type: 'error', message: '房間已滿' }));
+        // Clean stale clients
+        for (const [id, client] of room.clients) {
+          if (client.readyState !== 1) room.clients.delete(id);
+        }
+        if (room.clients.size >= MAX_CLIENTS) {
+          ws.send(JSON.stringify({ type: 'error', message: `房間已滿 (最多 ${MAX_CLIENTS} 人)` }));
           return;
         }
-        room.clients.push(ws);
+        const peerId = generatePeerId();
+        // Get list of existing peers BEFORE adding new one
+        const existingPeers = Array.from(room.clients.keys());
+
+        room.clients.set(peerId, ws);
         ws.roomCode = code;
-        ws.send(JSON.stringify({ type: 'room-joined', code }));
-        // Notify peers with role assignment
-        if (room.clients.length === 2) {
-          // First client is initiator, second is receiver
-          const [first, second] = room.clients;
-          if (first.readyState === 1) {
-            first.send(JSON.stringify({ type: 'peer-joined', count: 2, role: 'initiator' }));
-          }
-          if (second.readyState === 1) {
-            second.send(JSON.stringify({ type: 'peer-joined', count: 2, role: 'receiver' }));
+        ws.peerId = peerId;
+
+        // Tell the new peer: here are existing peers, you are receiver for each
+        ws.send(JSON.stringify({
+          type: 'room-joined',
+          code,
+          peerId,
+          peers: existingPeers,
+        }));
+
+        // Tell each existing peer: a new peer joined, you are initiator
+        for (const [id, client] of room.clients) {
+          if (id !== peerId && client.readyState === 1) {
+            client.send(JSON.stringify({
+              type: 'peer-joined',
+              peerId,
+              count: room.clients.size,
+            }));
           }
         }
         break;
       }
 
       case 'signal': {
+        // Route signal to specific peer
         const room = rooms.get(ws.roomCode);
         if (!room) return;
-        room.clients.forEach(client => {
-          if (client !== ws && client.readyState === 1) {
-            client.send(JSON.stringify({ type: 'signal', data: msg.data }));
-          }
-        });
-        break;
-      }
-
-      // Check if room exists (without joining)
-      case 'check-room': {
-        const code = msg.code;
-        const room = rooms.get(code);
-        if (!room) {
-          ws.send(JSON.stringify({ type: 'room-not-found', code }));
-        } else {
-          ws.send(JSON.stringify({ type: 'room-exists', code }));
+        const target = room.clients.get(msg.to);
+        if (target && target.readyState === 1) {
+          target.send(JSON.stringify({
+            type: 'signal',
+            from: ws.peerId,
+            data: msg.data,
+          }));
         }
         break;
       }
 
-      // Client-side keep-alive
+      case 'check-room': {
+        const room = rooms.get(msg.code);
+        if (!room) {
+          ws.send(JSON.stringify({ type: 'room-not-found', code: msg.code }));
+        } else {
+          ws.send(JSON.stringify({ type: 'room-exists', code: msg.code }));
+        }
+        break;
+      }
+
       case 'ping': {
         ws.isAlive = true;
         ws.send(JSON.stringify({ type: 'pong' }));
@@ -121,38 +142,38 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('close', () => {
-    if (ws.roomCode) {
+    if (ws.roomCode && ws.peerId) {
       const room = rooms.get(ws.roomCode);
       if (room) {
-        room.clients = room.clients.filter(c => c !== ws);
-        // Notify remaining peer
-        room.clients.forEach(client => {
+        room.clients.delete(ws.peerId);
+        // Notify remaining peers
+        for (const [id, client] of room.clients) {
           if (client.readyState === 1) {
-            client.send(JSON.stringify({ type: 'peer-left' }));
+            client.send(JSON.stringify({
+              type: 'peer-left',
+              peerId: ws.peerId,
+              count: room.clients.size,
+            }));
           }
-        });
-        // Keep room alive for 5 minutes for reconnection
-        if (room.clients.length === 0) {
+        }
+        if (room.clients.size === 0) {
           room.deleteTimer = setTimeout(() => {
             const r = rooms.get(ws.roomCode);
-            if (r && r.clients.length === 0) {
-              rooms.delete(ws.roomCode);
-            }
-          }, 5 * 60 * 1000);
+            if (r && r.clients.size === 0) rooms.delete(ws.roomCode);
+          }, 2 * 60 * 1000);
         }
       }
     }
   });
 });
 
-// Server-side heartbeat - check every 2 minutes, generous timeout
 const heartbeat = setInterval(() => {
   wss.clients.forEach(ws => {
     if (!ws.isAlive) return ws.terminate();
     ws.isAlive = false;
     ws.ping();
   });
-}, 120000);
+}, 45000);
 
 wss.on('close', () => clearInterval(heartbeat));
 

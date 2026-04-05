@@ -1,14 +1,10 @@
 // ===== Room Page UI Logic =====
 
-// ===== Get room code from URL =====
 const params = new URLSearchParams(location.search);
 const roomCode = params.get('room');
+if (!roomCode) location.href = '/';
 
-if (!roomCode) {
-  location.href = '/';
-}
-
-// ===== DOM Elements =====
+// ===== DOM =====
 const statusDot = document.getElementById('status-dot');
 const connectionText = document.getElementById('connection-text');
 const roomCodeDisplay = document.getElementById('room-code-display');
@@ -26,17 +22,14 @@ const toastEl = document.getElementById('toast');
 
 roomCodeDisplay.textContent = roomCode;
 
-// ===== Toast =====
-function showToast(message, type = '') {
-  toastEl.textContent = message;
+function showToast(msg, type = '') {
+  toastEl.textContent = msg;
   toastEl.className = `toast show ${type}`;
   clearTimeout(toastEl._timer);
-  toastEl._timer = setTimeout(() => {
-    toastEl.className = 'toast hidden';
-  }, 3000);
+  toastEl._timer = setTimeout(() => { toastEl.className = 'toast hidden'; }, 3000);
 }
 
-// ===== Tab Switching =====
+// Tabs
 tabs.forEach(tab => {
   tab.addEventListener('click', () => {
     tabs.forEach(t => t.classList.remove('active'));
@@ -46,32 +39,24 @@ tabs.forEach(tab => {
   });
 });
 
-// ===== WebSocket + WebRTC Setup =====
+// ===== Connection =====
 const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-
 let ws = null;
-let peer = null;
-let isInitiator = false;
+let peerManager = null;
+let localPeerId = null;
+let wsKeepAlive = null;
 let joinRetries = 0;
 const MAX_RETRIES = 5;
 
-let wsKeepAlive = null;
-
-function setConnected(connected) {
-  statusDot.classList.toggle('connected', connected);
-  connectionText.textContent = connected ? '已連線 - P2P 直連' : '等待對方連線...';
-}
-
-function updateConnectionStatus() {
-  const webrtcOk = peer && peer.connected;
-  const wsOk = ws && ws.readyState === 1;
-  statusDot.classList.toggle('connected', webrtcOk);
-  if (webrtcOk) {
-    connectionText.textContent = '已連線 - P2P 直連';
-  } else if (wsOk) {
-    connectionText.textContent = '已加入房間，等待對方...';
+function updateStatus(connectedCount, totalPeers) {
+  const ok = connectedCount > 0;
+  statusDot.classList.toggle('connected', ok);
+  if (ok) {
+    connectionText.textContent = `已連線 - ${connectedCount} 台裝置 P2P 直連`;
+  } else if (totalPeers > 0) {
+    connectionText.textContent = '正在建立 P2P 連線...';
   } else {
-    connectionText.textContent = '重新連線中...';
+    connectionText.textContent = '已加入房間，等待其他裝置...';
   }
 }
 
@@ -80,13 +65,10 @@ function connectWS() {
 
   ws.onopen = () => {
     ws.send(JSON.stringify({ type: 'join-room', code: roomCode }));
-    // Client-side keep-alive every 30 seconds
     clearInterval(wsKeepAlive);
     wsKeepAlive = setInterval(() => {
-      if (ws.readyState === 1) {
-        ws.send(JSON.stringify({ type: 'ping' }));
-      }
-    }, 30000);
+      if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'ping' }));
+    }, 20000);
   };
 
   ws.onmessage = (event) => {
@@ -95,54 +77,49 @@ function connectWS() {
     switch (msg.type) {
       case 'room-joined':
         joinRetries = 0;
-        updateConnectionStatus();
+        localPeerId = msg.peerId;
+        // Create peer manager
+        if (peerManager) peerManager.closeAll();
+        peerManager = new PeerManager(ws, localPeerId, updateStatus, handleReceivedData);
+        // Connect to existing peers in room (we are receiver for each)
+        if (msg.peers && msg.peers.length > 0) {
+          peerManager.connectToExisting(msg.peers);
+        }
+        updateStatus(0, msg.peers ? msg.peers.length : 0);
         break;
 
       case 'peer-joined':
-        if (msg.count === 2) {
-          // Clean up any previous peer before creating new one
-          if (peer) {
-            peer.close();
-            peer = null;
-          }
-          const initiator = msg.role === 'initiator';
-          setupPeer(initiator);
+        // A new device joined — we are initiator for this peer
+        if (peerManager) {
+          peerManager.addNewPeer(msg.peerId);
         }
         break;
 
       case 'signal':
-        if (!peer) {
-          setupPeer(false);
+        // Route signal to the correct peer connection
+        if (peerManager) {
+          peerManager.handleSignal(msg.from, msg.data);
         }
-        peer.handleSignal(msg.data);
         break;
 
       case 'peer-left':
-        // Reset peer so next peer-joined can re-establish connection
-        if (peer) {
-          peer.close();
-          peer = null;
+        if (peerManager) {
+          peerManager.removePeer(msg.peerId);
         }
-        setConnected(false);
-        connectionText.textContent = '等待對方連線...';
         break;
 
       case 'pong':
-        // Server responded to our keep-alive
         break;
 
       case 'error':
         if (msg.message === '房間不存在' && joinRetries < MAX_RETRIES) {
           joinRetries++;
-          connectionText.textContent = `正在重試連線 (${joinRetries}/${MAX_RETRIES})...`;
+          connectionText.textContent = `重試連線 (${joinRetries}/${MAX_RETRIES})...`;
           setTimeout(() => {
-            if (ws.readyState === 1) {
-              ws.send(JSON.stringify({ type: 'join-room', code: roomCode }));
-            }
+            if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'join-room', code: roomCode }));
           }, 1000);
         } else if (msg.message === '房間不存在') {
-          // Only redirect if WebRTC is not connected
-          if (!peer || !peer.connected) {
+          if (!peerManager || peerManager.connectedCount === 0) {
             showToast('房間不存在或已過期', 'error');
             setTimeout(() => { location.href = '/'; }, 2000);
           }
@@ -155,40 +132,26 @@ function connectWS() {
 
   ws.onclose = () => {
     clearInterval(wsKeepAlive);
-    // Only show disconnected if WebRTC is also not connected
-    if (!peer || !peer.connected) {
-      connectionText.textContent = '連線中斷，重新連線中...';
-      setConnected(false);
+    if (!peerManager || peerManager.connectedCount === 0) {
+      connectionText.textContent = '重新連線中...';
+      statusDot.classList.remove('connected');
     }
-    // Always try to reconnect WebSocket (needed for signaling)
     setTimeout(() => connectWS(), 2000);
   };
 }
 
 connectWS();
 
-function setupPeer(initiator) {
-  peer = new PeerConnection(
-    ws,
-    () => updateConnectionStatus(),
-    () => updateConnectionStatus(),
-    (data) => handleReceivedData(data)
-  );
-  peer.init(initiator);
-}
-
-// ===== Sending Files =====
+// ===== Send Files =====
 function sendFiles(files) {
-  if (!peer || !peer.connected) {
+  if (!peerManager || peerManager.connectedCount === 0) {
     showToast('尚未連線，無法傳送', 'error');
     return;
   }
-
   Array.from(files).forEach(file => {
     const itemId = 'send-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
-    addTransferItem(itemId, file.name, file.size, 'sending');
-
-    peer.sendFile(file, (loaded, total) => {
+    addTransferItem(itemId, file.name, file.size);
+    peerManager.sendFileToAll(file, (loaded, total) => {
       updateTransferProgress(itemId, loaded, total);
     }).then(() => {
       markTransferDone(itemId);
@@ -197,58 +160,21 @@ function sendFiles(files) {
   });
 }
 
-// ===== File Input Handlers =====
-inputFile.addEventListener('change', (e) => {
-  if (e.target.files.length > 0) {
-    sendFiles(e.target.files);
-    e.target.value = '';
-  }
-});
+inputFile.addEventListener('change', (e) => { if (e.target.files.length) { sendFiles(e.target.files); e.target.value = ''; } });
+inputCamera.addEventListener('change', (e) => { if (e.target.files.length) { sendFiles(e.target.files); e.target.value = ''; } });
+inputGallery.addEventListener('change', (e) => { if (e.target.files.length) { sendFiles(e.target.files); e.target.value = ''; } });
 
-inputCamera.addEventListener('change', (e) => {
-  if (e.target.files.length > 0) {
-    sendFiles(e.target.files);
-    e.target.value = '';
-  }
-});
+// Drag & Drop
+dropZoneFile.addEventListener('dragover', (e) => { e.preventDefault(); dropZoneFile.classList.add('dragover'); });
+dropZoneFile.addEventListener('dragleave', () => { dropZoneFile.classList.remove('dragover'); });
+dropZoneFile.addEventListener('drop', (e) => { e.preventDefault(); dropZoneFile.classList.remove('dragover'); if (e.dataTransfer.files.length) sendFiles(e.dataTransfer.files); });
 
-inputGallery.addEventListener('change', (e) => {
-  if (e.target.files.length > 0) {
-    sendFiles(e.target.files);
-    e.target.value = '';
-  }
-});
-
-// ===== Drag & Drop =====
-dropZoneFile.addEventListener('dragover', (e) => {
-  e.preventDefault();
-  dropZoneFile.classList.add('dragover');
-});
-
-dropZoneFile.addEventListener('dragleave', () => {
-  dropZoneFile.classList.remove('dragover');
-});
-
-dropZoneFile.addEventListener('drop', (e) => {
-  e.preventDefault();
-  dropZoneFile.classList.remove('dragover');
-  if (e.dataTransfer.files.length > 0) {
-    sendFiles(e.dataTransfer.files);
-  }
-});
-
-// ===== Send Text =====
+// Send Text
 btnSendText.addEventListener('click', () => {
   const text = textInput.value.trim();
-  if (!text) {
-    showToast('請輸入文字', 'error');
-    return;
-  }
-  if (!peer || !peer.connected) {
-    showToast('尚未連線，無法傳送', 'error');
-    return;
-  }
-  if (peer.sendText(text)) {
+  if (!text) { showToast('請輸入文字', 'error'); return; }
+  if (!peerManager || peerManager.connectedCount === 0) { showToast('尚未連線，無法傳送', 'error'); return; }
+  if (peerManager.sendTextToAll(text)) {
     addSentTextItem(text);
     textInput.value = '';
     showToast('文字已傳送', 'success');
@@ -256,9 +182,7 @@ btnSendText.addEventListener('click', () => {
 });
 
 textInput.addEventListener('keydown', (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-    btnSendText.click();
-  }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') btnSendText.click();
 });
 
 // ===== Transfer UI =====
@@ -281,7 +205,7 @@ function getFileIcon(name) {
   return icons[ext] || '\u{1F4CE}';
 }
 
-function addTransferItem(id, name, size, status) {
+function addTransferItem(id, name, size) {
   const div = document.createElement('div');
   div.className = 'transfer-item';
   div.id = id;
@@ -289,15 +213,10 @@ function addTransferItem(id, name, size, status) {
     <span class="transfer-icon">${getFileIcon(name)}</span>
     <div class="transfer-info">
       <div class="transfer-name">${escapeHtml(name)}</div>
-      <div class="transfer-meta">
-        <span>${formatSize(size)}</span>
-      </div>
-      <div class="transfer-progress">
-        <div class="transfer-progress-bar" style="width: 0%"></div>
-      </div>
+      <div class="transfer-meta"><span>${formatSize(size)}</span></div>
+      <div class="transfer-progress"><div class="transfer-progress-bar" style="width:0%"></div></div>
     </div>
-    <span class="transfer-status sending">傳送中</span>
-  `;
+    <span class="transfer-status sending">傳送中</span>`;
   transferItems.prepend(div);
 }
 
@@ -313,9 +232,9 @@ function markTransferDone(id) {
   const item = document.getElementById(id);
   if (!item) return;
   item.querySelector('.transfer-progress-bar').style.width = '100%';
-  const status = item.querySelector('.transfer-status');
-  status.textContent = '完成';
-  status.className = 'transfer-status done';
+  const s = item.querySelector('.transfer-status');
+  s.textContent = '完成';
+  s.className = 'transfer-status done';
 }
 
 function addSentTextItem(text) {
@@ -327,12 +246,11 @@ function addSentTextItem(text) {
       <div class="transfer-name">${escapeHtml(text.slice(0, 50))}${text.length > 50 ? '...' : ''}</div>
       <div class="transfer-meta"><span>文字訊息</span></div>
     </div>
-    <span class="transfer-status done">已送出</span>
-  `;
+    <span class="transfer-status done">已送出</span>`;
   transferItems.prepend(div);
 }
 
-// ===== Receiving Data =====
+// ===== Receive =====
 const receivingFiles = {};
 
 function handleReceivedData(data) {
@@ -341,30 +259,22 @@ function handleReceivedData(data) {
       addReceivedText(data.data);
       showToast('收到文字訊息', 'success');
       break;
-
     case 'file-start':
-      receivingFiles[data.name] = {
-        name: data.name,
-        size: data.size,
-        mimeType: data.mimeType,
-      };
+      receivingFiles[data.name] = { name: data.name, size: data.size, mimeType: data.mimeType };
       const recvId = 'recv-' + Date.now();
       receivingFiles[data.name]._id = recvId;
-      addTransferItem(recvId, data.name, data.size, 'receiving');
-      // Update label
-      const statusEl = document.getElementById(recvId)?.querySelector('.transfer-status');
-      if (statusEl) { statusEl.textContent = '接收中'; statusEl.className = 'transfer-status sending'; }
+      addTransferItem(recvId, data.name, data.size);
+      const el = document.getElementById(recvId)?.querySelector('.transfer-status');
+      if (el) { el.textContent = '接收中'; el.className = 'transfer-status sending'; }
       break;
-
     case 'file-progress':
       const rf = receivingFiles[data.name];
       if (rf) updateTransferProgress(rf._id, data.loaded, data.total);
       break;
-
     case 'file-complete':
       addReceivedFile(data);
-      const rfDone = receivingFiles[data.name];
-      if (rfDone) markTransferDone(rfDone._id);
+      const done = receivingFiles[data.name];
+      if (done) markTransferDone(done._id);
       delete receivingFiles[data.name];
       showToast(`收到檔案: ${data.name}`, 'success');
       break;
@@ -378,12 +288,9 @@ function addReceivedText(text) {
     <div class="received-text">${escapeHtml(text)}</div>
     <div class="received-text-actions">
       <button class="btn btn-secondary btn-small btn-copy" data-text="${escapeAttr(text)}">複製</button>
-    </div>
-  `;
+    </div>`;
   div.querySelector('.btn-copy').addEventListener('click', (e) => {
-    navigator.clipboard.writeText(e.target.dataset.text).then(() => {
-      showToast('已複製到剪貼簿', 'success');
-    });
+    navigator.clipboard.writeText(e.target.dataset.text).then(() => showToast('已複製到剪貼簿', 'success'));
   });
   receivedItems.prepend(div);
 }
@@ -391,36 +298,18 @@ function addReceivedText(text) {
 function addReceivedFile(data) {
   const url = URL.createObjectURL(data.blob);
   const isImage = data.mimeType.startsWith('image/');
-
   const div = document.createElement('div');
   div.className = 'received-item';
-
-  let preview = '';
-  if (isImage) {
-    preview = `<img src="${url}" class="received-image-preview" alt="${escapeAttr(data.name)}">`;
-  }
-
   div.innerHTML = `
-    ${preview}
-    <div style="display:flex;align-items:center;gap:10px;justify-content:space-between;">
-      <span style="font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+    ${isImage ? `<img src="${url}" class="received-image-preview" alt="${escapeAttr(data.name)}">` : ''}
+    <div style="display:flex;align-items:center;gap:10px;justify-content:space-between;flex-wrap:wrap;">
+      <span style="font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;">
         ${getFileIcon(data.name)} ${escapeHtml(data.name)} (${formatSize(data.size)})
       </span>
-      <a href="${url}" download="${escapeAttr(data.name)}" class="btn-download">
-        &#x2B07;&#xFE0F; 下載
-      </a>
-    </div>
-  `;
+      <a href="${url}" download="${escapeAttr(data.name)}" class="btn-download">&#x2B07;&#xFE0F; 下載</a>
+    </div>`;
   receivedItems.prepend(div);
 }
 
-// ===== Utilities =====
-function escapeHtml(str) {
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
-}
-
-function escapeAttr(str) {
-  return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
+function escapeHtml(str) { const d = document.createElement('div'); d.textContent = str; return d.innerHTML; }
+function escapeAttr(str) { return str.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
