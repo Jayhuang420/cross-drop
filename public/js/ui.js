@@ -99,9 +99,9 @@ function connectWS() {
         break;
 
       case 'peer-joined':
-        if (msg.count === 2) {
-          isInitiator = true;
-          setupPeer(true);
+        if (msg.count === 2 && !peer) {
+          const initiator = msg.role === 'initiator';
+          setupPeer(initiator);
         }
         break;
 

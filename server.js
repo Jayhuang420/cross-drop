@@ -74,12 +74,17 @@ wss.on('connection', (ws) => {
         room.clients.push(ws);
         ws.roomCode = code;
         ws.send(JSON.stringify({ type: 'room-joined', code }));
-        // Notify both peers
-        room.clients.forEach(client => {
-          if (client.readyState === 1) {
-            client.send(JSON.stringify({ type: 'peer-joined', count: room.clients.length }));
+        // Notify peers with role assignment
+        if (room.clients.length === 2) {
+          // First client is initiator, second is receiver
+          const [first, second] = room.clients;
+          if (first.readyState === 1) {
+            first.send(JSON.stringify({ type: 'peer-joined', count: 2, role: 'initiator' }));
           }
-        });
+          if (second.readyState === 1) {
+            second.send(JSON.stringify({ type: 'peer-joined', count: 2, role: 'receiver' }));
+          }
+        }
         break;
       }
 
