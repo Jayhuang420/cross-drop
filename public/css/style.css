@@ -216,15 +216,16 @@ h1 {
 
 /* Room Code Display */
 .room-code {
-  font-size: 48px;
+  font-size: 36px;
   font-weight: 800;
-  letter-spacing: 12px;
+  letter-spacing: 8px;
   color: var(--accent);
   padding: 16px;
   background: rgba(0, 206, 201, 0.08);
   border-radius: var(--radius-sm);
   margin-bottom: 12px;
-  font-variant-numeric: tabular-nums;
+  font-family: 'SF Mono', 'Consolas', monospace;
+  word-break: break-all;
 }
 
 /* QR Container */

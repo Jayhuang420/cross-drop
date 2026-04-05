@@ -1,51 +1,107 @@
 const express = require('express');
 const http = require('http');
+const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
+
+// ===== Security Headers =====
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(self), microphone=()');
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' wss: ws:; img-src 'self' blob: data:;");
+  next();
+});
 
 app.use(express.static(path.join(__dirname, 'public')));
 
+// ===== Config =====
 const MAX_CLIENTS = 5;
-// Room storage: roomCode -> { clients: Map<peerId, ws>, created, deleteTimer }
+const MAX_MESSAGE_SIZE = 8 * 1024; // 8KB max for signaling messages
+const ROOM_CODE_LENGTH = 8; // 8-char alphanumeric (2.8 trillion combinations)
+const ROOM_TTL = 60 * 60 * 1000; // 1 hour
+const ROOM_EMPTY_TTL = 2 * 60 * 1000; // 2 min after last client leaves
+const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
+const RATE_LIMIT_MAX = 20; // max 20 join/check attempts per minute per IP
+
+// ===== Rate Limiter =====
+const rateLimits = new Map(); // ip -> { count, resetAt }
+
+function isRateLimited(ip) {
+  const now = Date.now();
+  let entry = rateLimits.get(ip);
+  if (!entry || now > entry.resetAt) {
+    entry = { count: 0, resetAt: now + RATE_LIMIT_WINDOW };
+    rateLimits.set(ip, entry);
+  }
+  entry.count++;
+  return entry.count > RATE_LIMIT_MAX;
+}
+
+// Clean rate limit entries every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, entry] of rateLimits) {
+    if (now > entry.resetAt) rateLimits.delete(ip);
+  }
+}, 5 * 60 * 1000);
+
+// ===== Room Storage =====
 const rooms = new Map();
-let peerIdCounter = 0;
 
 function generateRoomCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // No 0/O/1/I to avoid confusion
   let code;
   do {
-    code = String(Math.floor(100000 + Math.random() * 900000));
+    const bytes = crypto.randomBytes(ROOM_CODE_LENGTH);
+    code = '';
+    for (let i = 0; i < ROOM_CODE_LENGTH; i++) {
+      code += chars[bytes[i] % chars.length];
+    }
   } while (rooms.has(code));
   return code;
 }
 
 function generatePeerId() {
-  return 'p' + (++peerIdCounter) + '_' + Math.random().toString(36).slice(2, 6);
+  return crypto.randomBytes(8).toString('hex');
 }
 
 // Clean up stale rooms
 setInterval(() => {
   const now = Date.now();
   for (const [code, room] of rooms) {
-    if (now - room.created > 60 * 60 * 1000 && room.clients.size === 0) {
+    if (now - room.created > ROOM_TTL && room.clients.size === 0) {
       rooms.delete(code);
     }
   }
 }, 10 * 60 * 1000);
 
-wss.on('connection', (ws) => {
+// ===== WebSocket Server =====
+const wss = new WebSocketServer({
+  server,
+  maxPayload: MAX_MESSAGE_SIZE,
+});
+
+wss.on('connection', (ws, req) => {
   ws.roomCode = null;
   ws.peerId = null;
   ws.isAlive = true;
+  ws.clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
 
   ws.on('pong', () => { ws.isAlive = true; });
 
   ws.on('message', (data) => {
+    // Size check (redundant with maxPayload but belt-and-suspenders)
+    if (data.length > MAX_MESSAGE_SIZE) return;
+
     let msg;
     try { msg = JSON.parse(data); } catch { return; }
+    if (!msg.type || typeof msg.type !== 'string') return;
 
     switch (msg.type) {
       case 'create-room': {
@@ -61,7 +117,13 @@ wss.on('connection', (ws) => {
       }
 
       case 'join-room': {
-        const code = msg.code;
+        if (!msg.code || typeof msg.code !== 'string') return;
+        // Rate limit
+        if (isRateLimited(ws.clientIp)) {
+          ws.send(JSON.stringify({ type: 'error', message: '操作太頻繁，請稍後再試' }));
+          return;
+        }
+        const code = msg.code.toUpperCase();
         const room = rooms.get(code);
         if (!room) {
           ws.send(JSON.stringify({ type: 'error', message: '房間不存在' }));
@@ -80,55 +142,42 @@ wss.on('connection', (ws) => {
           return;
         }
         const peerId = generatePeerId();
-        // Get list of existing peers BEFORE adding new one
         const existingPeers = Array.from(room.clients.keys());
-
         room.clients.set(peerId, ws);
         ws.roomCode = code;
         ws.peerId = peerId;
-
-        // Tell the new peer: here are existing peers, you are receiver for each
-        ws.send(JSON.stringify({
-          type: 'room-joined',
-          code,
-          peerId,
-          peers: existingPeers,
-        }));
-
-        // Tell each existing peer: a new peer joined, you are initiator
+        ws.send(JSON.stringify({ type: 'room-joined', code, peerId, peers: existingPeers }));
         for (const [id, client] of room.clients) {
           if (id !== peerId && client.readyState === 1) {
-            client.send(JSON.stringify({
-              type: 'peer-joined',
-              peerId,
-              count: room.clients.size,
-            }));
+            client.send(JSON.stringify({ type: 'peer-joined', peerId, count: room.clients.size }));
           }
         }
         break;
       }
 
       case 'signal': {
-        // Route signal to specific peer
+        if (!msg.to || !msg.data) return;
         const room = rooms.get(ws.roomCode);
         if (!room) return;
         const target = room.clients.get(msg.to);
         if (target && target.readyState === 1) {
-          target.send(JSON.stringify({
-            type: 'signal',
-            from: ws.peerId,
-            data: msg.data,
-          }));
+          target.send(JSON.stringify({ type: 'signal', from: ws.peerId, data: msg.data }));
         }
         break;
       }
 
       case 'check-room': {
-        const room = rooms.get(msg.code);
+        if (!msg.code || typeof msg.code !== 'string') return;
+        if (isRateLimited(ws.clientIp)) {
+          ws.send(JSON.stringify({ type: 'error', message: '操作太頻繁，請稍後再試' }));
+          return;
+        }
+        const code = msg.code.toUpperCase();
+        const room = rooms.get(code);
         if (!room) {
-          ws.send(JSON.stringify({ type: 'room-not-found', code: msg.code }));
+          ws.send(JSON.stringify({ type: 'room-not-found', code }));
         } else {
-          ws.send(JSON.stringify({ type: 'room-exists', code: msg.code }));
+          ws.send(JSON.stringify({ type: 'room-exists', code }));
         }
         break;
       }
@@ -146,21 +195,16 @@ wss.on('connection', (ws) => {
       const room = rooms.get(ws.roomCode);
       if (room) {
         room.clients.delete(ws.peerId);
-        // Notify remaining peers
         for (const [id, client] of room.clients) {
           if (client.readyState === 1) {
-            client.send(JSON.stringify({
-              type: 'peer-left',
-              peerId: ws.peerId,
-              count: room.clients.size,
-            }));
+            client.send(JSON.stringify({ type: 'peer-left', peerId: ws.peerId, count: room.clients.size }));
           }
         }
         if (room.clients.size === 0) {
           room.deleteTimer = setTimeout(() => {
             const r = rooms.get(ws.roomCode);
             if (r && r.clients.size === 0) rooms.delete(ws.roomCode);
-          }, 2 * 60 * 1000);
+          }, ROOM_EMPTY_TTL);
         }
       }
     }

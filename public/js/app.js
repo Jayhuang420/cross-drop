@@ -101,13 +101,12 @@ btnCreate.addEventListener('click', () => {
 });
 
 btnJoin.addEventListener('click', () => {
-  const code = inputCode.value.trim();
-  if (code.length !== 6) {
-    showToast('請輸入 6 位數房間代碼', 'error');
+  const code = inputCode.value.trim().toUpperCase();
+  if (code.length !== 8 || !/^[A-Z0-9]+$/.test(code)) {
+    showToast('請輸入 8 位房間代碼', 'error');
     return;
   }
   btnJoin.disabled = true;
-  // Only CHECK if room exists, don't join — room.html handles joining
   ws.send(JSON.stringify({ type: 'check-room', code }));
 });
 
@@ -115,9 +114,9 @@ btnCancel.addEventListener('click', () => {
   location.reload();
 });
 
-// Auto-focus and format code input
+// Auto-format code input: uppercase, alphanumeric only
 inputCode.addEventListener('input', (e) => {
-  e.target.value = e.target.value.replace(/\D/g, '').slice(0, 6);
+  e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
 });
 
 inputCode.addEventListener('keydown', (e) => {
