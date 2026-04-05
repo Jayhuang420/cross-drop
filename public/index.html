@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#6C5CE7">
+  <title>CrossDrop - 跨平台互傳</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="logo">
+        <span class="logo-icon">&#x2194;&#xFE0F;</span>
+        <h1>CrossDrop</h1>
+      </div>
+      <p class="tagline">iPhone / Android / 電腦 跨平台互傳工具</p>
+    </header>
+
+    <main id="home-screen">
+      <div class="card" id="create-section">
+        <h2>建立房間</h2>
+        <p>建立一個新房間，等待對方加入</p>
+        <button id="btn-create" class="btn btn-primary">建立房間</button>
+      </div>
+
+      <div class="divider"><span>或</span></div>
+
+      <div class="card" id="join-section">
+        <h2>加入房間</h2>
+        <p>輸入 6 位數房間代碼加入</p>
+        <div class="code-input-group">
+          <input type="text" id="input-code" maxlength="6" pattern="[0-9]*" inputmode="numeric" placeholder="000000" autocomplete="off">
+          <button id="btn-join" class="btn btn-secondary">加入</button>
+        </div>
+      </div>
+    </main>
+
+    <!-- Room created: show code + QR -->
+    <main id="waiting-screen" class="hidden">
+      <div class="card center">
+        <h2>房間已建立</h2>
+        <div class="room-code" id="display-code"></div>
+        <p>請對方輸入此代碼，或掃描下方 QR Code</p>
+        <div id="qr-container"></div>
+        <div class="status" id="waiting-status">
+          <div class="pulse"></div>
+          <span>等待對方加入...</span>
+        </div>
+        <button id="btn-cancel" class="btn btn-ghost">取消</button>
+      </div>
+    </main>
+
+    <!-- Error/status toast -->
+    <div id="toast" class="toast hidden"></div>
+  </div>
+
+  <script src="/js/qrcode-mini.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#6C5CE7">
+  <title>CrossDrop - 傳輸中</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="logo">
+        <span class="logo-icon">&#x2194;&#xFE0F;</span>
+        <h1>CrossDrop</h1>
+      </div>
+    </header>
+
+    <!-- Connection Status Bar -->
+    <div class="connection-bar">
+      <div class="connection-info">
+        <div class="status-dot" id="status-dot"></div>
+        <span id="connection-text">連線中...</span>
+      </div>
+      <span class="room-code-small" id="room-code-display"></span>
+    </div>
+
+    <!-- Tab Navigation -->
+    <div class="tabs">
+      <button class="tab active" data-tab="file">&#x1F4C1; 檔案</button>
+      <button class="tab" data-tab="photo">&#x1F4F7; 照片/影片</button>
+      <button class="tab" data-tab="text">&#x1F4AC; 文字</button>
+    </div>
+
+    <!-- File Tab -->
+    <div class="tab-panel active" id="panel-file">
+      <div class="card">
+        <div class="drop-zone" id="drop-zone-file">
+          <div class="drop-zone-icon">&#x1F4C2;</div>
+          <div class="drop-zone-text">
+            拖拽檔案到此處<br>或 <strong>點擊選擇檔案</strong>
+          </div>
+          <input type="file" id="input-file" multiple>
+        </div>
+      </div>
+    </div>
+
+    <!-- Photo Tab -->
+    <div class="tab-panel" id="panel-photo">
+      <div class="card">
+        <div class="photo-options">
+          <label class="photo-option">
+            <div class="photo-option-icon">&#x1F4F8;</div>
+            <span>拍照</span>
+            <input type="file" id="input-camera" accept="image/*" capture="environment">
+          </label>
+          <label class="photo-option">
+            <div class="photo-option-icon">&#x1F5BC;&#xFE0F;</div>
+            <span>選擇照片</span>
+            <input type="file" id="input-gallery" accept="image/*,video/*" multiple>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Text Tab -->
+    <div class="tab-panel" id="panel-text">
+      <div class="card">
+        <div class="text-area-wrapper">
+          <textarea id="text-input" placeholder="輸入要傳送的文字..."></textarea>
+        </div>
+        <button class="btn btn-primary btn-send-text" id="btn-send-text">傳送文字</button>
+      </div>
+    </div>
+
+    <!-- Transfer Progress List -->
+    <div class="transfer-list" id="transfer-list">
+      <h3>&#x1F4E4; 傳輸紀錄</h3>
+      <div id="transfer-items"></div>
+    </div>
+
+    <!-- Received Items -->
+    <div class="transfer-list" id="received-list" class="hidden">
+      <h3>&#x1F4E5; 已接收</h3>
+      <div id="received-items"></div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="toast hidden"></div>
+  </div>
+
+  <script src="/js/webrtc.js"></script>
+  <script src="/js/ui.js"></script>
+</body>
+</html>

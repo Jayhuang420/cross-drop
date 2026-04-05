@@ -1,0 +1,14 @@
+{
+  "name": "cross-drop",
+  "version": "1.0.0",
+  "description": "跨平台檔案互傳工具 - 類似 AirDrop 的網頁版",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "ws": "^8.18.0"
+  }
+}
