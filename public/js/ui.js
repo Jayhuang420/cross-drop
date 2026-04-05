@@ -55,9 +55,24 @@ let isInitiator = false;
 let joinRetries = 0;
 const MAX_RETRIES = 5;
 
+let wsKeepAlive = null;
+
 function setConnected(connected) {
   statusDot.classList.toggle('connected', connected);
   connectionText.textContent = connected ? '已連線 - P2P 直連' : '等待對方連線...';
+}
+
+function updateConnectionStatus() {
+  const webrtcOk = peer && peer.connected;
+  const wsOk = ws && ws.readyState === 1;
+  statusDot.classList.toggle('connected', webrtcOk);
+  if (webrtcOk) {
+    connectionText.textContent = '已連線 - P2P 直連';
+  } else if (wsOk) {
+    connectionText.textContent = '已加入房間，等待對方...';
+  } else {
+    connectionText.textContent = '重新連線中...';
+  }
 }
 
 function connectWS() {
@@ -65,6 +80,13 @@ function connectWS() {
 
   ws.onopen = () => {
     ws.send(JSON.stringify({ type: 'join-room', code: roomCode }));
+    // Client-side keep-alive every 20 seconds
+    clearInterval(wsKeepAlive);
+    wsKeepAlive = setInterval(() => {
+      if (ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'ping' }));
+      }
+    }, 20000);
   };
 
   ws.onmessage = (event) => {
@@ -73,7 +95,7 @@ function connectWS() {
     switch (msg.type) {
       case 'room-joined':
         joinRetries = 0;
-        connectionText.textContent = '已加入房間，等待對方...';
+        updateConnectionStatus();
         break;
 
       case 'peer-joined':
@@ -91,9 +113,16 @@ function connectWS() {
         break;
 
       case 'peer-left':
-        setConnected(false);
-        connectionText.textContent = '對方已離開';
-        showToast('對方已離開房間', 'error');
+        // Only show disconnected if WebRTC is also not connected
+        if (!peer || !peer.connected) {
+          setConnected(false);
+          connectionText.textContent = '對方已離開';
+          showToast('對方已離開房間', 'error');
+        }
+        break;
+
+      case 'pong':
+        // Server responded to our keep-alive
         break;
 
       case 'error':
@@ -106,8 +135,11 @@ function connectWS() {
             }
           }, 1000);
         } else if (msg.message === '房間不存在') {
-          showToast('房間不存在或已過期', 'error');
-          setTimeout(() => { location.href = '/'; }, 2000);
+          // Only redirect if WebRTC is not connected
+          if (!peer || !peer.connected) {
+            showToast('房間不存在或已過期', 'error');
+            setTimeout(() => { location.href = '/'; }, 2000);
+          }
         } else {
           showToast(msg.message, 'error');
         }
@@ -116,14 +148,14 @@ function connectWS() {
   };
 
   ws.onclose = () => {
-    setConnected(false);
-    connectionText.textContent = '連線中斷，重新連線中...';
-    // Auto reconnect after 2 seconds
-    setTimeout(() => {
-      if (!peer || !peer.connected) {
-        connectWS();
-      }
-    }, 2000);
+    clearInterval(wsKeepAlive);
+    // Only show disconnected if WebRTC is also not connected
+    if (!peer || !peer.connected) {
+      connectionText.textContent = '連線中斷，重新連線中...';
+      setConnected(false);
+    }
+    // Always try to reconnect WebSocket (needed for signaling)
+    setTimeout(() => connectWS(), 2000);
   };
 }
 
@@ -132,8 +164,8 @@ connectWS();
 function setupPeer(initiator) {
   peer = new PeerConnection(
     ws,
-    () => setConnected(true),
-    () => setConnected(false),
+    () => updateConnectionStatus(),
+    () => updateConnectionStatus(),
     (data) => handleReceivedData(data)
   );
   peer.init(initiator);
