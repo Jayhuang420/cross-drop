@@ -114,28 +114,28 @@ wss.on('connection', (ws) => {
             client.send(JSON.stringify({ type: 'peer-left' }));
           }
         });
-        // Keep room alive for 2 minutes for reconnection
+        // Keep room alive for 5 minutes for reconnection
         if (room.clients.length === 0) {
           room.deleteTimer = setTimeout(() => {
             const r = rooms.get(ws.roomCode);
             if (r && r.clients.length === 0) {
               rooms.delete(ws.roomCode);
             }
-          }, 2 * 60 * 1000);
+          }, 5 * 60 * 1000);
         }
       }
     }
   });
 });
 
-// Server-side heartbeat - check every 45 seconds, allow 90s total before termination
+// Server-side heartbeat - check every 2 minutes, generous timeout
 const heartbeat = setInterval(() => {
   wss.clients.forEach(ws => {
     if (!ws.isAlive) return ws.terminate();
     ws.isAlive = false;
     ws.ping();
   });
-}, 45000);
+}, 120000);
 
 wss.on('close', () => clearInterval(heartbeat));
 

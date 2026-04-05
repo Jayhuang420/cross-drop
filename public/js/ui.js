@@ -80,13 +80,13 @@ function connectWS() {
 
   ws.onopen = () => {
     ws.send(JSON.stringify({ type: 'join-room', code: roomCode }));
-    // Client-side keep-alive every 20 seconds
+    // Client-side keep-alive every 30 seconds
     clearInterval(wsKeepAlive);
     wsKeepAlive = setInterval(() => {
       if (ws.readyState === 1) {
         ws.send(JSON.stringify({ type: 'ping' }));
       }
-    }, 20000);
+    }, 30000);
   };
 
   ws.onmessage = (event) => {
