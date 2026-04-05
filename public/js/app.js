@@ -47,11 +47,11 @@ function showScreen(screen) {
 
 // ===== WebSocket Handlers =====
 ws.onopen = () => {
-  // Check if URL has room code (from QR scan)
+  // If URL has room code (from QR scan), go directly to room.html
   const params = new URLSearchParams(location.search);
   const joinCode = params.get('room');
   if (joinCode) {
-    ws.send(JSON.stringify({ type: 'join-room', code: joinCode }));
+    location.href = `/room.html?room=${joinCode}`;
   }
 };
 
@@ -63,27 +63,29 @@ ws.onmessage = (event) => {
       currentRoomCode = msg.code;
       displayCode.textContent = msg.code;
       showScreen(waitingScreen);
-      // Generate QR Code - points directly to room.html
+      // Generate QR Code
       const roomUrl = `${location.origin}/room.html?room=${msg.code}`;
       generateQR(roomUrl, qrContainer);
-      // Creator goes to room.html immediately (room persists on server)
+      // Go to room.html immediately — room persists on server for 2 min
       setTimeout(() => {
         location.href = `/room.html?room=${msg.code}`;
       }, 500);
       break;
 
-    case 'room-joined':
-      currentRoomCode = msg.code;
-      // Redirect to room page
+    // check-room response: room exists → redirect
+    case 'room-exists':
       location.href = `/room.html?room=${msg.code}`;
       break;
 
-    case 'peer-joined':
-      // Already on waiting screen or about to redirect
+    // check-room response: room not found
+    case 'room-not-found':
+      showToast('房間不存在，請確認代碼', 'error');
+      btnJoin.disabled = false;
       break;
 
     case 'error':
       showToast(msg.message, 'error');
+      btnJoin.disabled = false;
       break;
   }
 };
@@ -104,7 +106,9 @@ btnJoin.addEventListener('click', () => {
     showToast('請輸入 6 位數房間代碼', 'error');
     return;
   }
-  ws.send(JSON.stringify({ type: 'join-room', code }));
+  btnJoin.disabled = true;
+  // Only CHECK if room exists, don't join — room.html handles joining
+  ws.send(JSON.stringify({ type: 'check-room', code }));
 });
 
 btnCancel.addEventListener('click', () => {

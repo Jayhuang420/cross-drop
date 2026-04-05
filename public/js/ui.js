@@ -99,7 +99,12 @@ function connectWS() {
         break;
 
       case 'peer-joined':
-        if (msg.count === 2 && !peer) {
+        if (msg.count === 2) {
+          // Clean up any previous peer before creating new one
+          if (peer) {
+            peer.close();
+            peer = null;
+          }
           const initiator = msg.role === 'initiator';
           setupPeer(initiator);
         }
@@ -113,12 +118,13 @@ function connectWS() {
         break;
 
       case 'peer-left':
-        // Only show disconnected if WebRTC is also not connected
-        if (!peer || !peer.connected) {
-          setConnected(false);
-          connectionText.textContent = '對方已離開';
-          showToast('對方已離開房間', 'error');
+        // Reset peer so next peer-joined can re-establish connection
+        if (peer) {
+          peer.close();
+          peer = null;
         }
+        setConnected(false);
+        connectionText.textContent = '等待對方連線...';
         break;
 
       case 'pong':

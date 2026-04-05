@@ -99,6 +99,18 @@ wss.on('connection', (ws) => {
         break;
       }
 
+      // Check if room exists (without joining)
+      case 'check-room': {
+        const code = msg.code;
+        const room = rooms.get(code);
+        if (!room) {
+          ws.send(JSON.stringify({ type: 'room-not-found', code }));
+        } else {
+          ws.send(JSON.stringify({ type: 'room-exists', code }));
+        }
+        break;
+      }
+
       // Client-side keep-alive
       case 'ping': {
         ws.isAlive = true;
