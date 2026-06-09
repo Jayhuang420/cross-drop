@@ -1,17 +1,30 @@
 // ===== WebRTC Multi-Peer Mesh Module =====
 
 const CHUNK_SIZE = 64 * 1024;
-// STUN for normal NAT + TURN relay (metered.ca) for strict NAT / mobile CGNAT,
-// where peers cannot connect directly. TURN creds are client-side by design.
-const ICE_SERVERS = [
+// ICE servers are fetched from our own server (/api/turn-credentials), which
+// injects TURN credentials using a metered.ca API key kept SERVER-SIDE only.
+// No long-lived TURN credentials live in this client bundle. Falls back to STUN.
+const STUN_ONLY = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'stun:stun.relay.metered.ca:80' },
-  { urls: 'turn:global.relay.metered.ca:80', username: 'c6ec83c0c3acb323598fa177', credential: 'SZrKvs2uO0+T6ycW' },
-  { urls: 'turn:global.relay.metered.ca:80?transport=tcp', username: 'c6ec83c0c3acb323598fa177', credential: 'SZrKvs2uO0+T6ycW' },
-  { urls: 'turn:global.relay.metered.ca:443', username: 'c6ec83c0c3acb323598fa177', credential: 'SZrKvs2uO0+T6ycW' },
-  { urls: 'turns:global.relay.metered.ca:443?transport=tcp', username: 'c6ec83c0c3acb323598fa177', credential: 'SZrKvs2uO0+T6ycW' },
 ];
+let _iceCache = null, _iceCacheAt = 0;
+async function getIceServers() {
+  const now = Date.now();
+  if (_iceCache && (now - _iceCacheAt) < 9 * 60 * 1000) return _iceCache;
+  try {
+    const r = await fetch('/api/turn-credentials', { cache: 'no-store' });
+    if (r.ok) {
+      const data = await r.json();
+      if (data && Array.isArray(data.iceServers) && data.iceServers.length) {
+        _iceCache = data.iceServers;
+        _iceCacheAt = now;
+        return _iceCache;
+      }
+    }
+  } catch (e) { /* network/credential error → STUN fallback */ }
+  return STUN_ONLY;
+}
 
 // Manages a single P2P connection to one remote peer
 class SinglePeer {
@@ -29,11 +42,11 @@ class SinglePeer {
     this._recvChunks = [];
     this._recvSize = 0;
 
-    this._init(isInitiator);
+    this._ready = this._init(isInitiator);
   }
 
-  _init(isInitiator) {
-    this.pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+  async _init(isInitiator) {
+    this.pc = new RTCPeerConnection({ iceServers: await getIceServers() });
 
     this.pc.onicecandidate = (event) => {
       if (event.candidate) {
@@ -116,6 +129,7 @@ class SinglePeer {
   }
 
   async handleSignal(signal) {
+    await this._ready; // ensure pc exists (ICE servers fetched) before signaling
     switch (signal.type) {
       case 'offer':
         await this.pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));

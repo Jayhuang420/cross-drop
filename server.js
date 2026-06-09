@@ -18,6 +18,40 @@ app.use((req, res, next) => {
   next();
 });
 
+// ===== TURN credentials (server-issued; keeps the metered API key off the client) =====
+const ALLOWED_ORIGINS = [
+  'https://share.oldjailab.com',
+  'https://cross-drop.zeabur.app',
+];
+const STUN_FALLBACK = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+  ],
+};
+const METERED_API_URL = process.env.METERED_TURN_API_URL
+  || 'https://oldjailab.metered.live/api/v1/turn/credentials';
+
+app.get('/api/turn-credentials', async (req, res) => {
+  const origin = req.headers.origin;
+  if (origin && !ALLOWED_ORIGINS.includes(origin) && !/^https?:\/\/localhost(:\d+)?$/.test(origin)) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  res.setHeader('Cache-Control', 'no-store');
+  const key = process.env.METERED_TURN_API_KEY;
+  if (!key) return res.json(STUN_FALLBACK); // no key set → STUN-only
+  try {
+    const r = await fetch(`${METERED_API_URL}?apiKey=${encodeURIComponent(key)}`);
+    if (!r.ok) throw new Error('metered ' + r.status);
+    const iceServers = await r.json(); // metered returns the iceServers array directly
+    if (!Array.isArray(iceServers) || !iceServers.length) throw new Error('empty iceServers');
+    return res.json({ iceServers });
+  } catch (e) {
+    console.error('TURN credentials fetch failed:', e.message);
+    return res.json(STUN_FALLBACK);
+  }
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ===== Config =====
