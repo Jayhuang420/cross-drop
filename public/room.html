@@ -27,9 +27,9 @@
     </div>
 
     <!-- Invite: room code + QR (collapsible; shown until a peer connects) -->
-    <div class="card center" id="invite-card" style="position:relative;">
-      <button id="invite-toggle" type="button" style="position:absolute;top:10px;left:12px;background:transparent;border:none;color:var(--text-muted);cursor:pointer;font-size:12px;padding:2px;line-height:1;letter-spacing:1px;">收合 ▲</button>
-      <p style="margin:0;">請對方輸入此代碼，或掃描 QR Code 加入</p>
+    <div class="card center" id="invite-card">
+      <button id="invite-toggle" type="button">收合 ▲</button>
+      <p class="invite-hint">請對方輸入此代碼，或掃描 QR Code 加入</p>
       <div id="invite-body">
         <div class="room-code" id="invite-code"></div>
         <div id="qr-container"></div>

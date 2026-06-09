@@ -661,3 +661,21 @@ h1 {
     font-size: 13px;
   }
 }
+
+/* ===== Invite collapse toggle (external CSS; inline styles are blocked by CSP style-src 'self') ===== */
+#invite-card { position: relative; }
+#invite-card .invite-hint { margin: 0; }
+#invite-toggle {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px;
+  line-height: 1;
+  letter-spacing: 1px;
+}
+#invite-toggle:hover { color: var(--primary-light); }
