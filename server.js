@@ -71,15 +71,44 @@ function generatePeerId() {
   return crypto.randomBytes(8).toString('hex');
 }
 
-// Clean up stale rooms
+// Remove a ws from its current room (notify peers, schedule empty-room cleanup).
+// Ensures a connection only ever belongs to one room → prevents orphan-room leaks.
+function leaveCurrentRoom(ws) {
+  if (!ws.roomCode || !ws.peerId) return;
+  const code = ws.roomCode;
+  const room = rooms.get(code);
+  if (room) {
+    room.clients.delete(ws.peerId);
+    for (const [, client] of room.clients) {
+      if (client.readyState === 1) {
+        client.send(JSON.stringify({ type: 'peer-left', peerId: ws.peerId, count: room.clients.size }));
+      }
+    }
+    if (room.clients.size === 0) {
+      if (room.deleteTimer) clearTimeout(room.deleteTimer);
+      room.deleteTimer = setTimeout(() => {
+        const r = rooms.get(code);
+        if (r && r.clients.size === 0) rooms.delete(code);
+      }, ROOM_EMPTY_TTL);
+    }
+  }
+  ws.roomCode = null;
+  ws.peerId = null;
+}
+
+// Clean up stale rooms + prune dead clients (backstop against orphan-room leaks)
 setInterval(() => {
   const now = Date.now();
   for (const [code, room] of rooms) {
-    if (now - room.created > ROOM_TTL && room.clients.size === 0) {
+    for (const [id, client] of room.clients) {
+      if (client.readyState !== 1) room.clients.delete(id);
+    }
+    if (room.clients.size === 0 && now - room.created > ROOM_EMPTY_TTL) {
+      if (room.deleteTimer) clearTimeout(room.deleteTimer);
       rooms.delete(code);
     }
   }
-}, 10 * 60 * 1000);
+}, 5 * 60 * 1000);
 
 // ===== WebSocket Server =====
 const wss = new WebSocketServer({
@@ -105,6 +134,12 @@ wss.on('connection', (ws, req) => {
 
     switch (msg.type) {
       case 'create-room': {
+        // Rate limit + leave any previous room (prevents orphan-room memory leak / DoS)
+        if (isRateLimited(ws.clientIp)) {
+          ws.send(JSON.stringify({ type: 'error', message: '操作太頻繁，請稍後再試' }));
+          return;
+        }
+        leaveCurrentRoom(ws);
         const code = generateRoomCode();
         const peerId = generatePeerId();
         const room = { clients: new Map(), created: Date.now(), deleteTimer: null };
@@ -141,6 +176,8 @@ wss.on('connection', (ws, req) => {
           ws.send(JSON.stringify({ type: 'error', message: `房間已滿 (最多 ${MAX_CLIENTS} 人)` }));
           return;
         }
+        // Leave previous room before joining a new one (prevents orphan-room leak)
+        leaveCurrentRoom(ws);
         const peerId = generatePeerId();
         const existingPeers = Array.from(room.clients.keys());
         room.clients.set(peerId, ws);
@@ -191,23 +228,7 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('close', () => {
-    if (ws.roomCode && ws.peerId) {
-      const room = rooms.get(ws.roomCode);
-      if (room) {
-        room.clients.delete(ws.peerId);
-        for (const [id, client] of room.clients) {
-          if (client.readyState === 1) {
-            client.send(JSON.stringify({ type: 'peer-left', peerId: ws.peerId, count: room.clients.size }));
-          }
-        }
-        if (room.clients.size === 0) {
-          room.deleteTimer = setTimeout(() => {
-            const r = rooms.get(ws.roomCode);
-            if (r && r.clients.size === 0) rooms.delete(ws.roomCode);
-          }, ROOM_EMPTY_TTL);
-        }
-      }
-    }
+    leaveCurrentRoom(ws);
   });
 });
 
