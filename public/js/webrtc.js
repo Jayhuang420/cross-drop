@@ -1,9 +1,16 @@
 // ===== WebRTC Multi-Peer Mesh Module =====
 
 const CHUNK_SIZE = 64 * 1024;
+// STUN for normal NAT + TURN relay (metered.ca) for strict NAT / mobile CGNAT,
+// where peers cannot connect directly. TURN creds are client-side by design.
 const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun.relay.metered.ca:80' },
+  { urls: 'turn:global.relay.metered.ca:80', username: 'c6ec83c0c3acb323598fa177', credential: 'SZrKvs2uO0+T6ycW' },
+  { urls: 'turn:global.relay.metered.ca:80?transport=tcp', username: 'c6ec83c0c3acb323598fa177', credential: 'SZrKvs2uO0+T6ycW' },
+  { urls: 'turn:global.relay.metered.ca:443', username: 'c6ec83c0c3acb323598fa177', credential: 'SZrKvs2uO0+T6ycW' },
+  { urls: 'turns:global.relay.metered.ca:443?transport=tcp', username: 'c6ec83c0c3acb323598fa177', credential: 'SZrKvs2uO0+T6ycW' },
 ];
 
 // Manages a single P2P connection to one remote peer
