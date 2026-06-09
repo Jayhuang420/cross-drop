@@ -52,7 +52,15 @@ app.get('/api/turn-credentials', async (req, res) => {
   }
 });
 
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders: (res, filePath) => {
+    // HTML must never be cached by browsers/edge/proxies, so UI updates show
+    // immediately (avoids stale room.html being served from an edge cache).
+    if (filePath.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    }
+  },
+}));
 
 // ===== Config =====
 const MAX_CLIENTS = 5;
