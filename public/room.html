@@ -26,6 +26,14 @@
       <span class="room-code-small" id="room-code-display"></span>
     </div>
 
+    <!-- Invite: room code + QR (shown until a peer connects) -->
+    <div class="card center" id="invite-card">
+      <p>請對方輸入此代碼，或掃描下方 QR Code 加入</p>
+      <div class="room-code" id="invite-code"></div>
+      <div id="qr-container"></div>
+      <div class="status"><div class="pulse"></div><span>等待對方加入...</span></div>
+    </div>
+
     <!-- Tab Navigation -->
     <div class="tabs">
       <button class="tab active" data-tab="file">&#x1F4C1; 檔案</button>
@@ -90,6 +98,7 @@
     <div id="toast" class="toast hidden"></div>
   </div>
 
+  <script src="/js/qrcode-mini.js"></script>
   <script src="/js/webrtc.js"></script>
   <script src="/js/ui.js"></script>
 </body>

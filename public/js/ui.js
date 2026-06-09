@@ -22,6 +22,21 @@ const toastEl = document.getElementById('toast');
 
 roomCodeDisplay.textContent = roomCode;
 
+// ===== Invite QR (shown until a peer connects) =====
+const inviteCard = document.getElementById('invite-card');
+const inviteCodeEl = document.getElementById('invite-code');
+if (inviteCodeEl) inviteCodeEl.textContent = roomCode;
+(function renderInviteQR() {
+  const c = document.getElementById('qr-container');
+  if (!c || typeof QRMini === 'undefined') return;
+  try {
+    const canvas = QRMini.toCanvas(`${location.origin}/room.html?room=${roomCode}`, { dark: '#EEEEF0', light: '#1A1A2E', margin: 2 });
+    canvas.style.borderRadius = '12px';
+    c.innerHTML = '';
+    c.appendChild(canvas);
+  } catch (e) { /* QR is optional; ignore render errors */ }
+})();
+
 function showToast(msg, type = '') {
   toastEl.textContent = msg;
   toastEl.className = `toast show ${type}`;
@@ -51,6 +66,7 @@ const MAX_RETRIES = 5;
 function updateStatus(connectedCount, totalPeers) {
   const ok = connectedCount > 0;
   statusDot.classList.toggle('connected', ok);
+  if (inviteCard) inviteCard.style.display = ok ? 'none' : '';
   if (ok) {
     connectionText.textContent = `已連線 - ${connectedCount} 台裝置 P2P 直連`;
   } else if (totalPeers > 0) {
