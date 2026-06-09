@@ -22,7 +22,7 @@ const toastEl = document.getElementById('toast');
 
 roomCodeDisplay.textContent = roomCode;
 
-// ===== Invite QR (shown until a peer connects) =====
+// ===== Invite QR (collapsible; shown until a peer connects) =====
 const inviteCard = document.getElementById('invite-card');
 const inviteCodeEl = document.getElementById('invite-code');
 if (inviteCodeEl) inviteCodeEl.textContent = roomCode;
@@ -30,12 +30,26 @@ if (inviteCodeEl) inviteCodeEl.textContent = roomCode;
   const c = document.getElementById('qr-container');
   if (!c || typeof QRMini === 'undefined') return;
   try {
-    const canvas = QRMini.toCanvas(`${location.origin}/room.html?room=${roomCode}`, { dark: '#EEEEF0', light: '#1A1A2E', margin: 2 });
+    // Dark modules on WHITE background → reliably scannable by phone cameras
+    // (inverted/light-on-dark QR codes often fail to scan)
+    const canvas = QRMini.toCanvas(`${location.origin}/room.html?room=${roomCode}`, { dark: '#11111B', light: '#FFFFFF', margin: 2 });
     canvas.style.borderRadius = '12px';
+    canvas.style.background = '#FFFFFF';
+    canvas.style.padding = '10px';
     c.innerHTML = '';
     c.appendChild(canvas);
   } catch (e) { /* QR is optional; ignore render errors */ }
 })();
+// Collapsible invite area (fold QR + code away)
+const inviteToggle = document.getElementById('invite-toggle');
+const inviteBody = document.getElementById('invite-body');
+if (inviteToggle && inviteBody) {
+  inviteToggle.addEventListener('click', () => {
+    const collapsed = inviteBody.style.display === 'none';
+    inviteBody.style.display = collapsed ? '' : 'none';
+    inviteToggle.textContent = collapsed ? '收合 ▲' : '展開 QR ▼';
+  });
+}
 
 function showToast(msg, type = '') {
   toastEl.textContent = msg;
