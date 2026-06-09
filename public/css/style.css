@@ -679,3 +679,38 @@ h1 {
   letter-spacing: 1px;
 }
 #invite-toggle:hover { color: var(--primary-light); }
+
+/* ===== Received file actions (external CSS; CSP blocks inline styles) ===== */
+.received-file-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.received-file-name {
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.received-file-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.btn-save-album {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: var(--accent);
+  color: #0F0F1A;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-save-album:hover { filter: brightness(1.08); }

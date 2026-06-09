@@ -327,17 +327,37 @@ function addReceivedText(text) {
 
 function addReceivedFile(data) {
   const url = URL.createObjectURL(data.blob);
-  const isImage = data.mimeType.startsWith('image/');
+  const mime = data.mimeType || '';
+  const isImage = mime.startsWith('image/');
+  const isVideo = mime.startsWith('video/');
   const div = document.createElement('div');
   div.className = 'received-item';
   div.innerHTML = `
     ${isImage ? `<img src="${url}" class="received-image-preview" alt="${escapeAttr(data.name)}">` : ''}
-    <div style="display:flex;align-items:center;gap:10px;justify-content:space-between;flex-wrap:wrap;">
-      <span style="font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;">
-        ${getFileIcon(data.name)} ${escapeHtml(data.name)} (${formatSize(data.size)})
+    <div class="received-file-row">
+      <span class="received-file-name">${getFileIcon(data.name)} ${escapeHtml(data.name)} (${formatSize(data.size)})</span>
+      <span class="received-file-actions">
+        ${(isImage || isVideo) ? `<button class="btn-save-album" type="button">&#x1F4F2; 存到相簿</button>` : ''}
+        <a href="${url}" download="${escapeAttr(data.name)}" class="btn-download">&#x2B07;&#xFE0F; 下載</a>
       </span>
-      <a href="${url}" download="${escapeAttr(data.name)}" class="btn-download">&#x2B07;&#xFE0F; 下載</a>
     </div>`;
+  // Save photo/video into the phone's album via the Web Share sheet (iOS: 儲存影像/影片).
+  const saveBtn = div.querySelector('.btn-save-album');
+  if (saveBtn) {
+    saveBtn.addEventListener('click', async () => {
+      try {
+        const file = new File([data.blob], data.name, { type: mime || 'application/octet-stream' });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          await navigator.share({ files: [file] }); // share sheet → save to Photos/相簿
+          return;
+        }
+      } catch (e) {
+        if (e && e.name === 'AbortError') return; // user cancelled the share sheet
+      }
+      // Fallback (older iOS / no file-share): open media so user can long-press → 加入照片
+      window.open(url, '_blank');
+    });
+  }
   receivedItems.prepend(div);
 }
 
