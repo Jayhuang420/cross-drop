@@ -58,6 +58,41 @@ function showToast(msg, type = '') {
   toastEl._timer = setTimeout(() => { toastEl.className = 'toast hidden'; }, 3000);
 }
 
+// ===== Shopee affiliate ad (every 20s + on transfer success; VIP code disables) =====
+let _adInterval = null;
+function isAdFree() { try { return localStorage.getItem('crossdrop_vip') === '1'; } catch (e) { return false; } }
+function showAd() {
+  if (isAdFree()) return;
+  const m = document.getElementById('ad-modal');
+  if (m) m.classList.remove('hidden');
+}
+function hideAd() {
+  const m = document.getElementById('ad-modal');
+  if (m) m.classList.add('hidden');
+}
+function startAds() {
+  if (isAdFree()) return;
+  if (_adInterval) clearInterval(_adInterval);
+  _adInterval = setInterval(showAd, 20000); // pop every 20 seconds
+}
+(function setupAds() {
+  const closeBtn = document.getElementById('ad-close');
+  const vipBtn = document.getElementById('ad-vip');
+  if (closeBtn) closeBtn.addEventListener('click', hideAd);
+  if (vipBtn) vipBtn.addEventListener('click', () => {
+    const code = prompt('輸入 VIP 密碼以免除廣告：');
+    if (code === 'oldjvip') {
+      try { localStorage.setItem('crossdrop_vip', '1'); } catch (e) {}
+      if (_adInterval) { clearInterval(_adInterval); _adInterval = null; }
+      hideAd();
+      showToast('已啟用 VIP，廣告已關閉', 'success');
+    } else if (code !== null) {
+      showToast('密碼錯誤', 'error');
+    }
+  });
+  startAds();
+})();
+
 // Tabs
 tabs.forEach(tab => {
   tab.addEventListener('click', () => {
@@ -195,6 +230,7 @@ async function sendFiles(files) {
       showToast(`${file.name} 傳送失敗`, 'error');
     }
   }
+  showAd(); // ad on successful send (after the batch finishes)
 }
 
 inputFile.addEventListener('change', (e) => { if (e.target.files.length) { sendFiles(e.target.files); e.target.value = ''; } });
@@ -314,6 +350,7 @@ function handleReceivedData(data) {
       if (done) markTransferDone(done._id);
       delete receivingFiles[data.name];
       showToast(`收到檔案: ${data.name}`, 'success');
+      showAd(); // ad on successful receive
       break;
   }
 }
