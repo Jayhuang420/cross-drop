@@ -173,21 +173,28 @@ function connectWS() {
 connectWS();
 
 // ===== Send Files =====
-function sendFiles(files) {
+async function sendFiles(files) {
   if (!peerManager || peerManager.connectedCount === 0) {
     showToast('尚未連線，無法傳送', 'error');
     return;
   }
-  Array.from(files).forEach(file => {
+  // Snapshot now (the <input> may be cleared right after this call) and send
+  // files ONE AT A TIME. Sending concurrently interleaves chunks on the single
+  // data channel and corrupts the receiver (which assembles one file at a time).
+  const list = Array.from(files);
+  for (const file of list) {
     const itemId = 'send-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
     addTransferItem(itemId, file.name, file.size);
-    peerManager.sendFileToAll(file, (loaded, total) => {
-      updateTransferProgress(itemId, loaded, total);
-    }).then(() => {
+    try {
+      await peerManager.sendFileToAll(file, (loaded, total) => {
+        updateTransferProgress(itemId, loaded, total);
+      });
       markTransferDone(itemId);
       showToast(`${file.name} 傳送完成`, 'success');
-    });
-  });
+    } catch (e) {
+      showToast(`${file.name} 傳送失敗`, 'error');
+    }
+  }
 }
 
 inputFile.addEventListener('change', (e) => { if (e.target.files.length) { sendFiles(e.target.files); e.target.value = ''; } });
