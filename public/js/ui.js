@@ -60,9 +60,13 @@ function showToast(msg, type = '') {
 
 // ===== Shopee affiliate ad (every 20s + on transfer success; VIP code disables) =====
 let _adInterval = null;
+let _lastAdAt = 0;
 function isAdFree() { try { return localStorage.getItem('crossdrop_vip') === '1'; } catch (e) { return false; } }
 function showAd() {
   if (isAdFree()) return;
+  const now = Date.now();
+  if (now - _lastAdAt < 15000) return; // throttle: don't stack/spam (e.g. multi-file receive)
+  _lastAdAt = now;
   const m = document.getElementById('ad-modal');
   if (m) m.classList.remove('hidden');
 }
@@ -78,7 +82,10 @@ function startAds() {
 (function setupAds() {
   const closeBtn = document.getElementById('ad-close');
   const vipBtn = document.getElementById('ad-vip');
+  const modalEl = document.getElementById('ad-modal');
   if (closeBtn) closeBtn.addEventListener('click', hideAd);
+  // Tap anywhere on the dim backdrop (outside the box) to dismiss — key on mobile
+  if (modalEl) modalEl.addEventListener('click', (e) => { if (e.target === modalEl) hideAd(); });
   if (vipBtn) vipBtn.addEventListener('click', () => {
     const code = prompt('輸入 VIP 密碼以免除廣告：');
     if (code === 'oldjvip') {

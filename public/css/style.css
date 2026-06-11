@@ -770,3 +770,6 @@ h1 {
   text-decoration: underline;
   cursor: pointer;
 }
+
+/* Bigger, easier-to-tap close button on mobile */
+.ad-close { top: 4px; right: 8px; padding: 8px 14px; font-size: 28px; }
