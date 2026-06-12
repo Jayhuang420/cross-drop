@@ -60,7 +60,6 @@ function showToast(msg, type = '') {
 
 // ===== Shopee affiliate ad (every 20s + on transfer success; VIP code disables) =====
 let _adInterval = null;
-let _adAutoHide = null;
 let _lastAdAt = 0;
 // >0 while a file is being sent/received. We NEVER pop the ad mid-transfer — the
 // 20s timer dimming the screen repeatedly during a long transfer was what made
@@ -76,12 +75,10 @@ function showAd() {
   const m = document.getElementById('ad-modal');
   if (!m) return;
   m.classList.remove('hidden');
-  // Safety net: auto-dismiss so the modal can NEVER permanently block interaction.
-  clearTimeout(_adAutoHide);
-  _adAutoHide = setTimeout(hideAd, 8000);
+  // By design: no auto-dismiss and no close button. The ad closes ONLY when the
+  // user taps the Shopee CTA (which opens it in a new tab) or enters the VIP code.
 }
 function hideAd() {
-  clearTimeout(_adAutoHide);
   const m = document.getElementById('ad-modal');
   if (m) m.classList.add('hidden');
 }
@@ -91,12 +88,11 @@ function startAds() {
   _adInterval = setInterval(showAd, 20000); // pop every 20 seconds (skipped while transferring)
 }
 (function setupAds() {
-  const closeBtn = document.getElementById('ad-close');
   const vipBtn = document.getElementById('ad-vip');
-  const modalEl = document.getElementById('ad-modal');
-  if (closeBtn) closeBtn.addEventListener('click', hideAd);
-  // Tap anywhere on the dim backdrop (outside the box) to dismiss — key on mobile
-  if (modalEl) modalEl.addEventListener('click', (e) => { if (e.target === modalEl) hideAd(); });
+  const ctaBtn = document.getElementById('ad-cta');
+  // Tapping the Shopee CTA is the (only) way to dismiss the ad — open the link
+  // in a new tab AND close the modal so the user returns to a usable page.
+  if (ctaBtn) ctaBtn.addEventListener('click', () => { hideAd(); });
   if (vipBtn) vipBtn.addEventListener('click', () => {
     const code = prompt('輸入 VIP 密碼以免除廣告：');
     if (code === null) return;            // user cancelled

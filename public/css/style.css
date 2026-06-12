@@ -737,17 +737,6 @@ h1 {
   text-align: center;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
 }
-.ad-close {
-  position: absolute;
-  top: 8px;
-  right: 12px;
-  background: transparent;
-  border: none;
-  color: var(--text-muted);
-  font-size: 24px;
-  line-height: 1;
-  cursor: pointer;
-}
 .ad-title { font-size: 20px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
 .ad-desc { font-size: 14px; color: var(--text-muted); line-height: 1.6; margin-bottom: 18px; }
 .ad-cta {
@@ -770,9 +759,6 @@ h1 {
   text-decoration: underline;
   cursor: pointer;
 }
-
-/* Bigger, easier-to-tap close button on mobile */
-.ad-close { top: 4px; right: 8px; padding: 8px 14px; font-size: 28px; }
 
 /* ===== VIP disable-ads bar (bottom of page) ===== */
 .vip-bar {
