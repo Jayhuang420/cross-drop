@@ -60,24 +60,35 @@ function showToast(msg, type = '') {
 
 // ===== Shopee affiliate ad (every 20s + on transfer success; VIP code disables) =====
 let _adInterval = null;
+let _adAutoHide = null;
 let _lastAdAt = 0;
+// >0 while a file is being sent/received. We NEVER pop the ad mid-transfer — the
+// 20s timer dimming the screen repeatedly during a long transfer was what made
+// the phone feel "frozen / can't do anything" after receiving a big file.
+let _activeTransfers = 0;
 function isAdFree() { try { return localStorage.getItem('crossdrop_vip') === '1'; } catch (e) { return false; } }
 function showAd() {
   if (isAdFree()) return;
+  if (_activeTransfers > 0) return;       // don't interrupt an in-progress transfer
   const now = Date.now();
-  if (now - _lastAdAt < 15000) return; // throttle: don't stack/spam (e.g. multi-file receive)
+  if (now - _lastAdAt < 8000) return;     // de-dupe rapid back-to-back calls (multi-file)
   _lastAdAt = now;
   const m = document.getElementById('ad-modal');
-  if (m) m.classList.remove('hidden');
+  if (!m) return;
+  m.classList.remove('hidden');
+  // Safety net: auto-dismiss so the modal can NEVER permanently block interaction.
+  clearTimeout(_adAutoHide);
+  _adAutoHide = setTimeout(hideAd, 8000);
 }
 function hideAd() {
+  clearTimeout(_adAutoHide);
   const m = document.getElementById('ad-modal');
   if (m) m.classList.add('hidden');
 }
 function startAds() {
   if (isAdFree()) return;
   if (_adInterval) clearInterval(_adInterval);
-  _adInterval = setInterval(showAd, 20000); // pop every 20 seconds
+  _adInterval = setInterval(showAd, 20000); // pop every 20 seconds (skipped while transferring)
 }
 (function setupAds() {
   const closeBtn = document.getElementById('ad-close');
@@ -224,20 +235,25 @@ async function sendFiles(files) {
   // files ONE AT A TIME. Sending concurrently interleaves chunks on the single
   // data channel and corrupts the receiver (which assembles one file at a time).
   const list = Array.from(files);
-  for (const file of list) {
-    const itemId = 'send-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
-    addTransferItem(itemId, file.name, file.size);
-    try {
-      await peerManager.sendFileToAll(file, (loaded, total) => {
-        updateTransferProgress(itemId, loaded, total);
-      });
-      markTransferDone(itemId);
-      showToast(`${file.name} 傳送完成`, 'success');
-    } catch (e) {
-      showToast(`${file.name} 傳送失敗`, 'error');
+  _activeTransfers++; // suppress ad pops until the whole batch finishes
+  try {
+    for (const file of list) {
+      const itemId = 'send-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+      addTransferItem(itemId, file.name, file.size);
+      try {
+        await peerManager.sendFileToAll(file, (loaded, total) => {
+          updateTransferProgress(itemId, loaded, total);
+        });
+        markTransferDone(itemId);
+        showToast(`${file.name} 傳送完成`, 'success');
+      } catch (e) {
+        showToast(`${file.name} 傳送失敗`, 'error');
+      }
     }
+  } finally {
+    _activeTransfers = Math.max(0, _activeTransfers - 1);
   }
-  showAd(); // ad on successful send (after the batch finishes)
+  showAd(); // ad once, after the batch finishes (never mid-transfer)
 }
 
 inputFile.addEventListener('change', (e) => { if (e.target.files.length) { sendFiles(e.target.files); e.target.value = ''; } });
@@ -340,6 +356,7 @@ function handleReceivedData(data) {
       showToast('收到文字訊息', 'success');
       break;
     case 'file-start':
+      _activeTransfers++; // suppress ad pops while this file is downloading
       receivingFiles[data.name] = { name: data.name, size: data.size, mimeType: data.mimeType };
       const recvId = 'recv-' + Date.now();
       receivingFiles[data.name]._id = recvId;
@@ -357,7 +374,8 @@ function handleReceivedData(data) {
       if (done) markTransferDone(done._id);
       delete receivingFiles[data.name];
       showToast(`收到檔案: ${data.name}`, 'success');
-      showAd(); // ad on successful receive
+      _activeTransfers = Math.max(0, _activeTransfers - 1);
+      showAd(); // ad once, after the file is fully received (never mid-transfer)
       break;
   }
 }
