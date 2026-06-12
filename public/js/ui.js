@@ -99,17 +99,49 @@ function startAds() {
   if (modalEl) modalEl.addEventListener('click', (e) => { if (e.target === modalEl) hideAd(); });
   if (vipBtn) vipBtn.addEventListener('click', () => {
     const code = prompt('輸入 VIP 密碼以免除廣告：');
-    if (code === 'oldjvip') {
-      try { localStorage.setItem('crossdrop_vip', '1'); } catch (e) {}
-      if (_adInterval) { clearInterval(_adInterval); _adInterval = null; }
-      hideAd();
-      showToast('已啟用 VIP，廣告已關閉', 'success');
-    } else if (code !== null) {
-      showToast('密碼錯誤', 'error');
-    }
+    if (code === null) return;            // user cancelled
+    if (!tryActivateVip(code.trim())) showToast('密碼錯誤', 'error');
   });
+
+  // Standalone VIP field at the bottom of the page
+  const vipInput = document.getElementById('vip-input');
+  const vipSubmit = document.getElementById('vip-submit');
+  function submitVipField() {
+    const code = (vipInput && vipInput.value || '').trim();
+    if (!code) return;
+    if (tryActivateVip(code)) { if (vipInput) vipInput.value = ''; }
+    else showToast('密碼錯誤', 'error');
+  }
+  if (vipSubmit) vipSubmit.addEventListener('click', submitVipField);
+  if (vipInput) vipInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitVipField(); });
+  reflectVipBar(); // show "already VIP" state on load if applicable
+
   startAds();
 })();
+
+// Enable ad-free mode for a correct code. Returns true on success.
+function tryActivateVip(code) {
+  if (code !== 'oldjvip') return false;
+  try { localStorage.setItem('crossdrop_vip', '1'); } catch (e) {}
+  if (_adInterval) { clearInterval(_adInterval); _adInterval = null; }
+  hideAd();
+  reflectVipBar();
+  showToast('已啟用 VIP，廣告已關閉', 'success');
+  return true;
+}
+
+// Reflect VIP status in the bottom bar (greys/accents the button, updates text).
+function reflectVipBar() {
+  const bar = document.getElementById('vip-bar');
+  const submit = document.getElementById('vip-submit');
+  const input = document.getElementById('vip-input');
+  if (!bar) return;
+  if (isAdFree()) {
+    bar.classList.add('vip-active');
+    if (submit) submit.textContent = '✓ 已關閉廣告';
+    if (input) input.placeholder = '已是 VIP，廣告已關閉';
+  }
+}
 
 // Tabs
 tabs.forEach(tab => {
@@ -130,10 +162,18 @@ let wsKeepAlive = null;
 let joinRetries = 0;
 const MAX_RETRIES = 5;
 
+let _collapsedOnConnect = false;
 function updateStatus(connectedCount, totalPeers) {
   const ok = connectedCount > 0;
   statusDot.classList.toggle('connected', ok);
-  if (inviteCard) inviteCard.style.display = ok ? 'none' : '';
+  // Keep the invite card + QR available after a device connects (so more devices
+  // can still scan to join the room). Just auto-collapse the QR body ONCE on the
+  // first connection to keep the transfer UI clean — the user can re-expand it.
+  if (ok && !_collapsedOnConnect && inviteBody && inviteToggle) {
+    _collapsedOnConnect = true;
+    inviteBody.style.display = 'none';
+    inviteToggle.textContent = '展開 QR ▼';
+  }
   if (ok) {
     connectionText.textContent = `已連線 - ${connectedCount} 台裝置 P2P 直連`;
   } else if (totalPeers > 0) {
