@@ -26,10 +26,17 @@
       <span class="room-code-small" id="room-code-display"></span>
     </div>
 
+    <!-- Connection problem notice (hidden until P2P fails or times out) -->
+    <div class="conn-notice hidden" id="conn-notice">
+      <span id="conn-notice-text"></span>
+      <button id="conn-retry" class="conn-retry" type="button">重試連線</button>
+    </div>
+
     <!-- Invite: room code + QR (collapsible; shown until a peer connects) -->
     <div class="card center" id="invite-card">
       <button id="invite-toggle" type="button">收合 ▲</button>
       <p class="invite-hint">請對方輸入此代碼，或掃描 QR Code 加入</p>
+      <p class="turn-warning hidden" id="turn-warning">&#x26A0;&#xFE0F; 中繼伺服器目前離線：不同網路的裝置可能無法連線（同一個 Wi-Fi 下可正常使用）</p>
       <div id="invite-body">
         <div class="room-code" id="invite-code"></div>
         <div id="qr-container"></div>
@@ -118,8 +125,8 @@
     </div>
   </div>
 
-  <script src="/js/qrcode-mini.js"></script>
-  <script src="/js/webrtc.js"></script>
-  <script src="/js/ui.js"></script>
+  <script src="/js/qrcode-mini.js?v=2"></script>
+  <script src="/js/webrtc.js?v=2"></script>
+  <script src="/js/ui.js?v=2"></script>
 </body>
 </html>

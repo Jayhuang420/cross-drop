@@ -794,3 +794,38 @@ h1 {
 }
 .vip-submit:hover { color: var(--text); border-color: var(--primary); }
 .vip-bar.vip-active .vip-submit { color: var(--accent); border-color: var(--accent); }
+
+/* ========== CONNECTION FAILURE NOTICE ========== */
+.conn-notice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(255, 118, 117, 0.08);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.conn-notice .conn-retry {
+  flex-shrink: 0;
+  background: var(--danger);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.conn-notice .conn-retry:active { opacity: 0.85; }
+
+/* Relay-offline heads-up on the invite card (.card p sets muted color, so match its specificity) */
+.turn-warning, .card p.turn-warning {
+  font-size: 12px;
+  color: var(--warning);
+  line-height: 1.5;
+  margin: -4px 0 10px;
+}

@@ -9,6 +9,21 @@ const STUN_ONLY = [
   { urls: 'stun:stun1.l.google.com:19302' },
 ];
 let _iceCache = null, _iceCacheAt = 0;
+// Whether a working TURN relay is available (the server probes it). Devices on
+// different networks (4G vs Wi-Fi, CGNAT…) can only connect through TURN, so
+// the UI uses this to explain failures instead of spinning forever.
+const turnStatus = { checked: false, available: null, provider: null };
+function getTurnStatus() { return turnStatus; }
+function _hasTurnUrl(s) {
+  const urls = Array.isArray(s.urls) ? s.urls : [s.urls];
+  return urls.some(u => /^turns?:/i.test(String(u)));
+}
+function _setTurnStatus(available, provider) {
+  turnStatus.checked = true;
+  turnStatus.available = available;
+  turnStatus.provider = provider || null;
+  try { document.dispatchEvent(new CustomEvent('turn-status', { detail: { ...turnStatus } })); } catch (e) { /* ignore */ }
+}
 async function getIceServers() {
   const now = Date.now();
   if (_iceCache && (now - _iceCacheAt) < 9 * 60 * 1000) return _iceCache;
@@ -19,10 +34,14 @@ async function getIceServers() {
       if (data && Array.isArray(data.iceServers) && data.iceServers.length) {
         _iceCache = data.iceServers;
         _iceCacheAt = now;
+        // `turn` is set by the server after a real allocate probe; older servers
+        // omit it, so fall back to "does the list contain a turn: url".
+        _setTurnStatus(data.turn !== false && data.iceServers.some(_hasTurnUrl), data.provider);
         return _iceCache;
       }
     }
   } catch (e) { /* network/credential error → STUN fallback */ }
+  _setTurnStatus(false, null);
   return STUN_ONLY;
 }
 
@@ -35,9 +54,12 @@ class SinglePeer {
     this.onConnected = onConnected;
     this.onDisconnected = onDisconnected;
     this.onData = onData;
+    this.isInitiator = isInitiator;
     this.pc = null;
     this.dataChannel = null;
     this.connected = false;
+    this.failed = false;       // ICE gave up (after one restart attempt)
+    this._iceFailures = 0;
     this._recvMeta = null;
     this._recvChunks = [];
     this._recvSize = 0;
@@ -62,11 +84,16 @@ class SinglePeer {
       const state = this.pc.connectionState;
       if (state === 'connected') {
         this.connected = true;
+        this.failed = false;
         this.onConnected(this.remotePeerId);
       } else if (['disconnected', 'failed', 'closed'].includes(state)) {
         this.connected = false;
         this.onDisconnected(this.remotePeerId);
       }
+    };
+
+    this.pc.oniceconnectionstatechange = () => {
+      if (this.pc.iceConnectionState === 'failed') this._onIceFailed();
     };
 
     if (isInitiator) {
@@ -118,8 +145,25 @@ class SinglePeer {
     }
   }
 
-  async _createOffer() {
-    const offer = await this.pc.createOffer();
+  // ICE failed: no candidate pair works (typically: different networks and no
+  // usable TURN relay). Try ONE ICE restart (the initiator re-offers with fresh
+  // candidates; the responder just waits for that offer). If it fails again,
+  // mark the peer as failed so the UI can explain instead of hanging.
+  async _onIceFailed() {
+    this._iceFailures++;
+    if (this._iceFailures === 1) {
+      if (this.isInitiator && this.pc.signalingState !== 'closed') {
+        try { await this._createOffer({ iceRestart: true }); } catch (e) { /* next 'failed' event marks the peer failed */ }
+      }
+      return;
+    }
+    this.failed = true;
+    this.connected = false;
+    this.onDisconnected(this.remotePeerId, 'failed');
+  }
+
+  async _createOffer(options) {
+    const offer = await this.pc.createOffer(options);
     await this.pc.setLocalDescription(offer);
     this.ws.send(JSON.stringify({
       type: 'signal',
@@ -261,6 +305,13 @@ class PeerManager {
     return this.peers.size;
   }
 
+  // Peers whose ICE negotiation gave up (see SinglePeer._onIceFailed)
+  get failedCount() {
+    let count = 0;
+    for (const p of this.peers.values()) if (p.failed) count++;
+    return count;
+  }
+
   closeAll() {
     for (const p of this.peers.values()) p.close();
     this.peers.clear();
@@ -287,6 +338,6 @@ class PeerManager {
   }
 
   _notifyStatus() {
-    this.onStatusChange(this.connectedCount, this.peers.size);
+    this.onStatusChange(this.connectedCount, this.peers.size, this.failedCount);
   }
 }

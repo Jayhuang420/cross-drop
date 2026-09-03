@@ -158,8 +158,60 @@ let wsKeepAlive = null;
 let joinRetries = 0;
 const MAX_RETRIES = 5;
 
+// ===== Connection failure handling =====
+// Before: when two devices could not reach each other (different networks and
+// the TURN relay rejecting allocations) the page sat on「正在建立 P2P 連線...」
+// forever with no explanation. Now: a watchdog + ICE-failure signal show a
+// notice that says WHY (relay offline vs. generic) and offers a retry.
+const CONNECT_TIMEOUT_MS = 20000;
+let _connWatchdog = null;
+const connNotice = document.getElementById('conn-notice');
+const connNoticeText = document.getElementById('conn-notice-text');
+const connRetry = document.getElementById('conn-retry');
+const turnWarning = document.getElementById('turn-warning');
+if (connRetry) connRetry.addEventListener('click', () => location.reload());
+
+function turnUnavailable() {
+  const st = (typeof getTurnStatus === 'function') ? getTurnStatus() : null;
+  return !!(st && st.checked && st.available === false);
+}
+function showConnNotice(text) {
+  if (!connNotice) return;
+  connNoticeText.textContent = text;
+  connNotice.classList.remove('hidden');
+}
+function hideConnNotice() {
+  if (connNotice) connNotice.classList.add('hidden');
+}
+function startConnWatchdog() {
+  if (_connWatchdog) return;
+  _connWatchdog = setTimeout(() => {
+    _connWatchdog = null;
+    if (peerManager && peerManager.totalPeers > 0 && peerManager.connectedCount === 0) showConnFailed();
+  }, CONNECT_TIMEOUT_MS);
+}
+function stopConnWatchdog() {
+  if (_connWatchdog) { clearTimeout(_connWatchdog); _connWatchdog = null; }
+}
+function showConnFailed() {
+  if (turnUnavailable()) {
+    connectionText.textContent = 'P2P 連線失敗（中繼伺服器離線）';
+    showConnNotice('兩台裝置無法直連，而中繼伺服器（TURN）目前無法使用。請讓兩台裝置連上同一個 Wi-Fi 後按「重試連線」，或稍後再試。');
+  } else {
+    connectionText.textContent = 'P2P 連線失敗';
+    showConnNotice('兩台裝置之間無法建立連線。請確認雙方網路正常後按「重試連線」（雙方都重新整理效果最好）。');
+  }
+}
+// Relay health is reported by webrtc.js after it fetches ICE servers. Show a
+// small heads-up on the invite card when no relay works, so users know that
+// only same-network devices will connect right now.
+document.addEventListener('turn-status', (e) => {
+  if (!turnWarning) return;
+  turnWarning.classList.toggle('hidden', !(e.detail && e.detail.checked && e.detail.available === false));
+});
+
 let _collapsedOnConnect = false;
-function updateStatus(connectedCount, totalPeers) {
+function updateStatus(connectedCount, totalPeers, failedCount = 0) {
   const ok = connectedCount > 0;
   statusDot.classList.toggle('connected', ok);
   // Keep the invite card + QR available after a device connects (so more devices
@@ -172,10 +224,20 @@ function updateStatus(connectedCount, totalPeers) {
   }
   if (ok) {
     connectionText.textContent = `已連線 - ${connectedCount} 台裝置 P2P 直連`;
+    stopConnWatchdog();
+    hideConnNotice();
   } else if (totalPeers > 0) {
-    connectionText.textContent = '正在建立 P2P 連線...';
+    if (failedCount > 0 && failedCount >= totalPeers) {
+      stopConnWatchdog();
+      showConnFailed();
+    } else {
+      connectionText.textContent = '正在建立 P2P 連線...';
+      startConnWatchdog();
+    }
   } else {
     connectionText.textContent = '已加入房間，等待其他裝置...';
+    stopConnWatchdog();
+    hideConnNotice();
   }
 }
 
@@ -260,6 +322,9 @@ function connectWS() {
 }
 
 connectWS();
+// Warm up ICE servers now (faster first connection) and learn relay health
+// early so the invite card can warn before anyone tries to join.
+if (typeof getIceServers === 'function') getIceServers();
 
 // ===== Send Files =====
 async function sendFiles(files) {

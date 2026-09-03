@@ -18,37 +18,42 @@ app.use((req, res, next) => {
   next();
 });
 
-// ===== TURN credentials (server-issued; keeps the metered API key off the client) =====
+// ===== TURN credentials (server-issued, multi-provider, allocate-probed — see turn.js) =====
+// The API keys stay server-side. Each provider is verified with a real TURN
+// Allocate before its credentials are handed out, so an over-quota / disabled
+// relay is skipped (and the client is told when no relay is available at all).
+const turn = require('./turn');
 const ALLOWED_ORIGINS = [
   'https://share.oldjailab.com',
   'https://cross-drop.zeabur.app',
 ];
-const STUN_FALLBACK = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-  ],
-};
-const METERED_API_URL = process.env.METERED_TURN_API_URL
-  || 'https://oldjailab.metered.live/api/v1/turn/credentials';
+function originAllowed(req) {
+  const origin = req.headers.origin;
+  return !origin || ALLOWED_ORIGINS.includes(origin) || /^https?:\/\/localhost(:\d+)?$/.test(origin);
+}
 
 app.get('/api/turn-credentials', async (req, res) => {
-  const origin = req.headers.origin;
-  if (origin && !ALLOWED_ORIGINS.includes(origin) && !/^https?:\/\/localhost(:\d+)?$/.test(origin)) {
-    return res.status(403).json({ error: 'forbidden' });
-  }
+  if (!originAllowed(req)) return res.status(403).json({ error: 'forbidden' });
   res.setHeader('Cache-Control', 'no-store');
-  const key = process.env.METERED_TURN_API_KEY;
-  if (!key) return res.json(STUN_FALLBACK); // no key set → STUN-only
   try {
-    const r = await fetch(`${METERED_API_URL}?apiKey=${encodeURIComponent(key)}`);
-    if (!r.ok) throw new Error('metered ' + r.status);
-    const iceServers = await r.json(); // metered returns the iceServers array directly
-    if (!Array.isArray(iceServers) || !iceServers.length) throw new Error('empty iceServers');
-    return res.json({ iceServers });
+    const { iceServers, turn: available, provider } = await turn.getIceServers();
+    return res.json({ iceServers, turn: available, provider });
   } catch (e) {
-    console.error('TURN credentials fetch failed:', e.message);
-    return res.json(STUN_FALLBACK);
+    console.error('TURN credentials failed:', e.message);
+    return res.json({ iceServers: turn.STUN_FALLBACK, turn: false, provider: null });
+  }
+});
+
+// Diagnostic (no secrets): which TURN providers are configured and whether the
+// active one passed the allocate probe. Handy right after changing env vars.
+app.get('/api/turn-status', async (req, res) => {
+  if (!originAllowed(req)) return res.status(403).json({ error: 'forbidden' });
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const { turn: available, provider } = await turn.getIceServers();
+    return res.json({ turn: available, provider, providers: turn.status() });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
   }
 });
 
