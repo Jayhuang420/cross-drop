@@ -9,7 +9,7 @@ workers_dev = true
 [vars]
 TURN_KEY_ID = "6ac0e58a9780c7cff31ba24c52e08c25"
 # Egress IP(s) of the CrossDrop server (Zeabur dedicated server). Empty = allow all.
-ALLOWED_IPS = ""
+ALLOWED_IPS = "43.167.190.143"
 CRED_TTL = "14400"
 
 [observability]
