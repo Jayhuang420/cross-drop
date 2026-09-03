@@ -14,10 +14,12 @@
 //      instead of hanging.
 //
 // Providers (first working one wins):
+//   - Credential proxy (Cloudflare Worker, see turn-worker/) — keeps the Cloudflare
+//     API token OFF this host: TURN_PROXY_URL (defaults to our Worker) + optional TURN_PROXY_KEY
 //   - Cloudflare Realtime TURN   CLOUDFLARE_TURN_KEY_ID + CLOUDFLARE_TURN_API_TOKEN
 //   - Static TURN (coturn/ExpressTURN/…)  TURN_URLS (comma-separated) + TURN_USERNAME + TURN_CREDENTIAL
 //   - metered.ca                 METERED_TURN_API_KEY (+ optional METERED_TURN_API_URL)
-//   Order can be overridden with TURN_PROVIDERS=cloudflare,static,metered
+//   Order can be overridden with TURN_PROVIDERS=proxy,cloudflare,static,metered
 //   Probing can be disabled with TURN_PROBE=off (not recommended).
 
 const net = require('net');
@@ -45,6 +47,29 @@ async function fetchWithTimeout(url, opts = {}) {
   } finally {
     clearTimeout(t);
   }
+}
+
+// Our Cloudflare Worker (turn-worker/) mints short-lived credentials using the
+// TURN API token stored as a Worker Secret. The Worker allow-lists this host's
+// egress IP, so no secret has to live in this deployment's env vars.
+const DEFAULT_PROXY_URL = 'https://crossdrop-turn.turn-worker.workers.dev/ice-servers';
+async function fetchProxy() {
+  if ((process.env.TURN_PROXY_URL || '').toLowerCase() === 'off') return null; // explicitly disabled
+  const url = process.env.TURN_PROXY_URL || DEFAULT_PROXY_URL;
+  const headers = {};
+  if (process.env.TURN_PROXY_KEY) headers['X-Proxy-Key'] = process.env.TURN_PROXY_KEY;
+  const r = await fetchWithTimeout(url, { headers });
+  if (!r.ok) {
+    // The Worker's error body is ours and secret-free (e.g. {"error":"forbidden","ip":"..."}),
+    // surfacing it in /api/turn-status makes IP allow-listing a one-look fix.
+    let detail = '';
+    try { detail = (await r.text()).slice(0, 120); } catch (e) { /* ignore */ }
+    throw new Error(`proxy ${r.status} ${detail}`.trim());
+  }
+  const data = await r.json();
+  const servers = data && data.iceServers;
+  if (!Array.isArray(servers) || !servers.length) throw new Error('proxy: empty iceServers');
+  return servers;
 }
 
 async function fetchCloudflare() {
@@ -92,11 +117,12 @@ async function fetchMetered() {
 }
 
 const PROVIDERS = {
+  proxy: fetchProxy,
   cloudflare: fetchCloudflare,
   static: fetchStatic,
   metered: fetchMetered,
 };
-const DEFAULT_ORDER = ['cloudflare', 'static', 'metered'];
+const DEFAULT_ORDER = ['proxy', 'cloudflare', 'static', 'metered'];
 
 function providerOrder() {
   const env = (process.env.TURN_PROVIDERS || '').split(',').map(s => s.trim()).filter(Boolean);
