@@ -27,6 +27,8 @@ export default {
 
     // Anyone may ask "who am I" — used once to learn the app host's egress IP.
     if (url.pathname === '/whoami') return json({ ip });
+    // Secret-free health check: is this deployment fully configured?
+    if (url.pathname === '/health') return json({ keyId: env.TURN_KEY_ID ? 'set' : 'missing', apiToken: env.TURN_API_TOKEN ? 'set' : 'missing', allowedIps: String(env.ALLOWED_IPS || '').split(',').filter(Boolean).length });
 
     if (url.pathname !== '/ice-servers') return json({ error: 'not found' }, 404);
     if (request.method !== 'GET' && request.method !== 'POST') return json({ error: 'method' }, 405);
